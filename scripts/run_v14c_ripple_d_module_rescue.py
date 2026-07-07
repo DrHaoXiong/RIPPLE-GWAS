@@ -70,6 +70,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument("--gene-set-file", type=Path, default=DEFAULT_GENE_SET_FILE)
     parser.add_argument("--traits", nargs="*", default=list(TRAITS))
+    parser.add_argument("--analysis-root", type=Path, default=ANALYSIS_ROOT)
+    parser.add_argument("--score-file", type=Path, default=None, help="Run a single trait from this score table.")
+    parser.add_argument("--score-dir", type=Path, default=None, help="Base directory for relative score_file entries.")
+    parser.add_argument(
+        "--trait-score-manifest",
+        type=Path,
+        default=None,
+        help="TSV with columns trait and score_file. Optional columns are allowed.",
+    )
     parser.add_argument("--n-null", type=int, default=200)
     parser.add_argument("--min-present", type=int, default=5)
     parser.add_argument("--score-cap", type=float, default=3.0)
@@ -132,9 +141,32 @@ def output_complete(tables_dir: Path, reports_dir: Path, prefix: str, *, write_n
     return all(path.exists() and path.stat().st_size > 0 for path in required)
 
 
-def load_scores(trait: str) -> tuple[pd.DataFrame, Path]:
+def load_score_manifest(args: argparse.Namespace) -> dict[str, Path]:
+    if args.score_file is not None:
+        trait = args.traits[0] if args.traits else "TRAIT"
+        return {trait: args.score_file}
+    if args.trait_score_manifest is not None:
+        manifest = pd.read_csv(args.trait_score_manifest, sep="\t")
+        required = {"trait", "score_file"}
+        missing = sorted(required - set(manifest.columns))
+        if missing:
+            raise ValueError(f"trait-score manifest is missing required columns: {missing}")
+        base = args.score_dir if args.score_dir is not None else args.trait_score_manifest.parent
+        return {
+            str(row.trait): (Path(str(row.score_file)) if Path(str(row.score_file)).is_absolute() else base / str(row.score_file))
+            for row in manifest.itertuples(index=False)
+        }
+    return {}
+
+
+def load_scores(trait: str, *, analysis_root: Path = ANALYSIS_ROOT, score_manifest: dict[str, Path] | None = None) -> tuple[pd.DataFrame, Path]:
+    if score_manifest and trait in score_manifest:
+        path = score_manifest[trait]
+        if not path.exists():
+            raise FileNotFoundError(path)
+        return pd.read_csv(path, sep="\t", compression="infer"), path
     cfg = TRAITS[trait]
-    path = ANALYSIS_ROOT / cfg["analysis_dir"] / "tables" / cfg["score_file"]
+    path = analysis_root / cfg["analysis_dir"] / "tables" / cfg["score_file"]
     if not path.exists():
         raise FileNotFoundError(path)
     scores = pd.read_csv(path, sep="\t", compression="infer")
@@ -213,9 +245,11 @@ def main() -> None:
 
     library = load_anchored_gene_set_library(args.gene_set_file)
     library = maybe_limit_library(library, args.max_modules)
+    score_manifest = load_score_manifest(args)
+    traits = list(score_manifest) if score_manifest else args.traits
     run_summaries: list[dict[str, object]] = []
-    for trait_idx, trait in enumerate(args.traits):
-        if trait not in TRAITS:
+    for trait_idx, trait in enumerate(traits):
+        if trait not in TRAITS and trait not in score_manifest:
             raise ValueError(f"Unknown trait {trait!r}; choose from {sorted(TRAITS)}")
         trait_completed_prefixes = [f"{trait}.w{int(window)}bp.v14c" for window in locus_windows]
         if args.resume and all(
@@ -227,7 +261,7 @@ def main() -> None:
                 run_summaries.append(json.loads(summary_path.read_text(encoding="utf-8")))
                 print(f"Skipping completed RIPPLE-D V1.4c output: {prefix}", flush=True)
             continue
-        scores, score_path = load_scores(trait)
+        scores, score_path = load_scores(trait, analysis_root=args.analysis_root, score_manifest=score_manifest)
         for window_idx, locus_window_bp in enumerate(locus_windows):
             config = RippleDConfig(
                 score_cap=args.score_cap,

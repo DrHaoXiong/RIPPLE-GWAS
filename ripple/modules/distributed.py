@@ -63,6 +63,17 @@ def finite_or_nan(value: object) -> float:
     return out if np.isfinite(out) else float("nan")
 
 
+def truthy_flag(value: object) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "y"}
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        pass
+    return bool(value)
+
+
 def cap_upper(values: np.ndarray | pd.Series, cap: float = DEFAULT_SCORE_CAP) -> np.ndarray:
     """Cap only the upper tail of positive association scores."""
 
@@ -1167,6 +1178,10 @@ def _locus_score_permutation_nulls_fast(
 
 
 def classify_distributed_module(row: Mapping[str, object], config: RippleDConfig) -> str:
+    degraded = truthy_flag(row.get("null_gene_count_match_degraded", False))
+    if config.manuscript_mode and degraded:
+        return "null_degraded_unresolved"
+
     locus_p = finite_or_nan(row.get("locus_robust_empirical_p"))
     ripple_p = finite_or_nan(row.get("ripple_d_empirical_p"))
     positive_p = finite_or_nan(row.get("positive_locus_empirical_p"))
@@ -1585,6 +1600,9 @@ def ripple_d_module_tests(
         "n_module_specific_rank_supported_module": int(
             modules["module_status"].eq("module_specific_rank_supported_module").sum()
         )
+        if "module_status" in modules
+        else 0,
+        "n_null_degraded_unresolved": int(modules["module_status"].eq("null_degraded_unresolved").sum())
         if "module_status" in modules
         else 0,
         "n_top_locus_dominant_module": int(modules["module_status"].eq("top_locus_dominant_module").sum())

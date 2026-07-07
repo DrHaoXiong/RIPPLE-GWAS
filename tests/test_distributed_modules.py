@@ -113,6 +113,25 @@ def test_distributed_gate_classifies_sparse_and_distributed_rows():
     assert classify_distributed_module(sparse, config) == "top_locus_dominant_module"
 
 
+def test_degraded_null_nan_does_not_block_classifier():
+    config = RippleDConfig()
+    row = {
+        "locus_robust_empirical_p": 0.02,
+        "ripple_d_empirical_p": 0.02,
+        "positive_locus_empirical_p": 0.02,
+        "module_specific_rank_empirical_p": 0.02,
+        "moderate_locus_burden_empirical_p": 0.04,
+        "leave_top1_locus_empirical_p": 0.08,
+        "raw_gene_empirical_p": 0.01,
+        "n_effective_loci": 6.0,
+        "top1_locus_contribution": 0.25,
+        "top5_locus_contribution": 0.65,
+        "null_gene_count_match_degraded": np.nan,
+    }
+
+    assert classify_distributed_module(row, config) == "distributed_weak_signal_module_candidate"
+
+
 def test_tiered_classifier_reports_mixed_sparse_distributed_support():
     config = RippleDConfig()
     row = {
@@ -358,3 +377,4 @@ def test_gene_count_replacement_audit_marks_degraded_null():
     assert row["null_with_replacement_rate"] > 0
     assert row["null_loci_with_insufficient_gene_pool_rate"] > 0
     assert bool(row["null_gene_count_match_degraded"])
+    assert row["module_status"] == "null_degraded_unresolved"

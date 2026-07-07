@@ -69,6 +69,7 @@ module_label:
   - top_locus_dominant_module
   - sparse_locus_pathway_overlap
   - raw_gene_set_enrichment_only
+  - null_degraded_unresolved
   - negative
 forbidden_language:
   - causal disease topology
@@ -265,3 +266,30 @@ module_layer_policy:
       - leave_top1_support
       - locus_window_stability
       - external_ld_block_or_clumped_locus_sensitivity
+  ripple_d_v1_5:
+    tier_name: "Tier 4D"
+    tier_description: "Manuscript-readiness audit for locus-aware distributed module diagnostics"
+    primary_change_from_v1_4c: "hard-blocks degraded nulls from strongest module labels, adds claim-readiness summary fields, supports public score manifests, and audits module overlap redundancy"
+    hard_blocking_status:
+      null_degraded_unresolved:
+        trigger: "null_gene_count_match_degraded is true in manuscript mode"
+        manuscript_role: "unresolved null-quality limitation; cannot support distributed weak-signal module claim"
+    required_claim_readiness_fields:
+      - pseudo_locus_window_stability_status
+      - ld_block_locus_sensitivity_status
+      - annotation_matching_sensitivity_status
+      - rank_evidence_interpretation
+      - manuscript_claim_ready
+      - downgrade_reason
+      - module_overlap_cluster_id
+      - representative_module_in_cluster
+      - max_jaccard_to_higher_ranked_module
+      - unique_locus_fraction
+      - redundancy_downgrade_reason
+    manuscript_ready_requires:
+      - no_null_degraded_unresolved_status
+      - stable_pseudo_locus_window_support
+      - external_ld_block_or_clumped_locus_sensitivity
+      - module_specific_rank_support
+      - no_overlap_redundancy_downgrade
+    interpretation_boundary: "V1.5 remains a diagnostic repair layer; final positive biological module claims require high-null validation and external locus sensitivity."
