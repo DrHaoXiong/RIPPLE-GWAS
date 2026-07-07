@@ -63,6 +63,9 @@ module_label:
   - not_tested
   - raw_enrichment_component
   - distributed_weak_signal_module_candidate
+  - mixed_sparse_distributed_candidate
+  - moderate_locus_supported_module
+  - rank_locus_supported_module
   - top_locus_dominant_module
   - sparse_locus_pathway_overlap
   - raw_gene_set_enrichment_only
@@ -164,3 +167,55 @@ module_layer_policy:
         manuscript_role: "raw enrichment only; no distributed claim"
       negative:
         manuscript_role: "negative_or_limitation"
+  ripple_d_v1_4:
+    tier_name: "Tier 4D"
+    tier_description: "Locus-aware module diagnostics with module-gene-count-preserving nulls"
+    primary_change_from_v1_3: "locus null samples the same number of genes per sampled locus as observed in the module"
+    required_audit_fields:
+      - null_gene_subset_sampling
+      - n_module_genes_per_locus
+      - null_exact_match_rate
+      - null_degree_fallback_rate
+      - null_global_fallback_rate
+      - min_match_pool_size
+      - median_match_pool_size
+      - median_genes_per_locus
+      - p95_genes_per_locus
+      - max_genes_per_locus
+      - max_locus_span_bp
+    interpretation_boundary: "V1.4 repairs null asymmetry but still requires locus-window and LD-block sensitivity before manuscript-level positive module claims"
+  ripple_d_v1_4b:
+    tier_name: "Tier 4D"
+    tier_description: "Locus-aware module diagnostics with positive-part/rank evidence and locus-window sensitivity"
+    primary_change_from_v1_4: "adds positive-part and rank-locus null-calibrated statistics, requires RIPPLE-D empirical support for the strongest hard-gate label, and reports pseudo-locus sensitivity"
+    hard_gate:
+      locus_robust_empirical_p_lt: 0.05
+      ripple_d_empirical_p_lt: 0.05
+      moderate_locus_burden_empirical_p_lt: 0.10
+      leave_top1_locus_empirical_p_lt: 0.10
+      positive_locus_or_rank_locus_empirical_p_lt: 0.05
+      n_effective_loci_gte: 5
+      top1_locus_contribution_lte: 0.35
+      top5_locus_contribution_lte: 0.70
+    module_status_levels:
+      distributed_weak_signal_module_candidate:
+        manuscript_role: "strongest diagnostic candidate; requires locus-window stability before final biological claim"
+      mixed_sparse_distributed_candidate:
+        manuscript_role: "diagnostic/supportive only; mixed sparse and distributed evidence"
+      moderate_locus_supported_module:
+        manuscript_role: "diagnostic/supportive only; moderate-locus burden without full distributed gate"
+      rank_locus_supported_module:
+        manuscript_role: "diagnostic/supportive only; rank-locus enrichment without full distributed gate"
+      top_locus_dominant_module:
+        manuscript_role: "sparse/top-locus component; not distributed"
+      sparse_locus_pathway_overlap:
+        manuscript_role: "supportive only; likely sparse locus overlap"
+      raw_gene_set_enrichment_only:
+        manuscript_role: "legacy raw enrichment only; no distributed claim"
+      negative:
+        manuscript_role: "negative_or_limitation"
+    required_sensitivity:
+      - locus_window_grid
+      - pseudo_locus_background_audit
+      - positive_locus_empirical_p
+      - rank_locus_empirical_p

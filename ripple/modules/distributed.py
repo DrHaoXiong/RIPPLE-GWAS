@@ -25,6 +25,9 @@ DEFAULT_TOP1_CONTRIBUTION_MAX = 0.35
 DEFAULT_TOP5_CONTRIBUTION_MAX = 0.70
 MODERATE_SCORE_LOW = 1.0
 MODERATE_SCORE_HIGH = 3.0
+DEFAULT_RIPPLE_D_P_MAX = 0.05
+DEFAULT_POSITIVE_LOCUS_P_MAX = 0.05
+DEFAULT_RANK_LOCUS_P_MAX = 0.05
 
 
 @dataclass(frozen=True)
@@ -41,6 +44,10 @@ class RippleDConfig:
     locus_collapse: str = "max"
     degree_bins: int = 10
     property_bins: int = 4
+    null_gene_subset_sampling: bool = True
+    ripple_d_p_max: float = DEFAULT_RIPPLE_D_P_MAX
+    positive_locus_p_max: float = DEFAULT_POSITIVE_LOCUS_P_MAX
+    rank_locus_p_max: float = DEFAULT_RANK_LOCUS_P_MAX
 
 
 def finite_or_nan(value: object) -> float:
@@ -164,12 +171,50 @@ def _collapse_locus_scores(selected: pd.DataFrame, *, score_col: str, collapse: 
     return agg.reset_index()
 
 
+def collapse_values(values: np.ndarray | pd.Series, *, collapse: str = "max") -> float:
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return float("nan")
+    if collapse == "max":
+        return float(np.max(arr))
+    if collapse == "huber_mean":
+        return float(np.mean(arr))
+    raise ValueError(f"Unknown locus collapse method: {collapse}")
+
+
 def locus_robust_stat(locus_scores: np.ndarray | pd.Series) -> float:
     values = np.asarray(locus_scores, dtype=float)
     values = values[np.isfinite(values)]
     if values.size == 0:
         return float("nan")
     return float(np.sum(values) / np.sqrt(values.size))
+
+
+def positive_locus_robust_stat(locus_scores: np.ndarray | pd.Series) -> float:
+    """Positive-part locus statistic for broad modules with passenger genes."""
+
+    values = np.asarray(locus_scores, dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        return float("nan")
+    positive = np.clip(values, 0.0, None)
+    return float(np.sum(positive) / np.sqrt(values.size))
+
+
+def rank_locus_enrichment_stat(rank_fractions: np.ndarray | pd.Series) -> float:
+    """Return a high-is-more-enriched statistic from locus rank fractions.
+
+    ``score_rank_fraction`` is small for top-ranked loci. This transform makes
+    stronger rank enrichment larger, avoiding a direction mismatch in null
+    calibration and downstream reports.
+    """
+
+    values = np.asarray(rank_fractions, dtype=float)
+    values = values[np.isfinite(values)]
+    if values.size == 0:
+        return float("nan")
+    return float(1.0 - np.mean(values))
 
 
 def contribution_metrics(locus_scores: np.ndarray | pd.Series) -> dict[str, float]:
@@ -290,7 +335,10 @@ def build_locus_background(
         mean_mapped_snp_count=("n_mapped_snps", "mean"),
         mean_local_ld_score=("local_ld_score", "mean"),
         annotation_density=("annotation_count", "mean"),
-        moderate_locus=("assoc_resid_score", lambda x: int(((x > 1.0) & (x < 3.0)).any())),
+        moderate_locus=(
+            "assoc_resid_score",
+            lambda x: int(((x > config.moderate_score_low) & (x < config.moderate_score_high)).any()),
+        ),
     )
     out = agg.reset_index().merge(locus_scores[["locus_id", "genome_locus_score"]], on="locus_id", how="left")
     out["score_rank"] = out["genome_locus_score"].rank(method="first", ascending=False)
@@ -312,6 +360,75 @@ def build_locus_background(
         + out["snp_count_bin"].astype(str)
     )
     return out
+
+
+def locus_background_audit_table(locus_background: pd.DataFrame) -> pd.DataFrame:
+    """Return one-row and per-bin diagnostics for a pseudo-locus background."""
+
+    if locus_background.empty:
+        return pd.DataFrame(
+            [
+                {
+                    "audit_level": "overall",
+                    "group": "all",
+                    "n_loci": 0,
+                    "median_genes_per_locus": float("nan"),
+                    "p90_genes_per_locus": float("nan"),
+                    "p95_genes_per_locus": float("nan"),
+                    "max_genes_per_locus": float("nan"),
+                    "median_locus_span_bp": float("nan"),
+                    "p95_locus_span_bp": float("nan"),
+                    "max_locus_span_bp": float("nan"),
+                }
+            ]
+        )
+    work = locus_background.copy()
+    work["locus_span_bp"] = pd.to_numeric(work["locus_end"], errors="coerce") - pd.to_numeric(
+        work["locus_start"], errors="coerce"
+    )
+
+    def summarize(group: pd.DataFrame, *, audit_level: str, group_name: str) -> dict[str, object]:
+        return {
+            "audit_level": audit_level,
+            "group": group_name,
+            "n_loci": int(group["locus_id"].nunique()),
+            "median_genes_per_locus": float(group["n_locus_genes"].median()),
+            "p90_genes_per_locus": float(group["n_locus_genes"].quantile(0.90)),
+            "p95_genes_per_locus": float(group["n_locus_genes"].quantile(0.95)),
+            "max_genes_per_locus": int(group["n_locus_genes"].max()),
+            "median_locus_span_bp": float(group["locus_span_bp"].median()),
+            "p95_locus_span_bp": float(group["locus_span_bp"].quantile(0.95)),
+            "max_locus_span_bp": float(group["locus_span_bp"].max()),
+        }
+
+    rows = [summarize(work, audit_level="overall", group_name="all")]
+    for chrom, group in work.groupby("chrom", observed=True):
+        rows.append(summarize(group, audit_level="chromosome", group_name=str(chrom)))
+    return pd.DataFrame(rows)
+
+
+def prepare_locus_inputs(
+    scores: pd.DataFrame,
+    library: AnchoredModuleLibrary | None,
+    config: RippleDConfig,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build the exact scored gene table and locus background used by RIPPLE-D."""
+
+    work = assign_pseudo_loci(scores, window_bp=config.locus_window_bp)
+    work = add_ripple_d_score_columns(work, config)
+    locus_background = build_locus_background(work, library, config)
+    return work, locus_background
+
+
+def prepare_locus_background(
+    scores: pd.DataFrame,
+    library: AnchoredModuleLibrary | None,
+    config: RippleDConfig,
+) -> pd.DataFrame:
+    """Build the exact locus background used by RIPPLE-D module tests."""
+
+    _, locus_background = prepare_locus_inputs(scores, library, config)
+    return locus_background
 
 
 def _sample_from_bin(
@@ -400,6 +517,8 @@ def summarize_module_distribution(
     scores: pd.DataFrame,
     module_genes: Sequence[str],
     config: RippleDConfig,
+    *,
+    locus_background: pd.DataFrame | None = None,
 ) -> dict[str, object]:
     selected, locus_table = _module_locus_scores(scores, module_genes, config)
     raw_values = selected["assoc_resid_score"].to_numpy(dtype=float)
@@ -407,9 +526,17 @@ def summarize_module_distribution(
     locus_scores = locus_table["locus_score"].to_numpy(dtype=float)
     contribution = contribution_metrics(locus_scores)
     ripple_d_value = ripple_d_stat(locus_scores, config)
-    rank_stat = (
-        float(selected["score_rank_fraction"].mean()) if "score_rank_fraction" in selected and not selected.empty else float("nan")
-    )
+    if locus_background is not None and not locus_table.empty:
+        by_locus = locus_background.set_index("locus_id", drop=False)
+        rank_values = by_locus.loc[
+            [locus for locus in locus_table["locus_id"].astype(str) if locus in by_locus.index],
+            "score_rank_fraction",
+        ].to_numpy(dtype=float)
+    elif "score_rank_fraction" in selected and not selected.empty:
+        rank_values = selected["score_rank_fraction"].to_numpy(dtype=float)
+    else:
+        rank_values = np.array([], dtype=float)
+    rank_stat = rank_locus_enrichment_stat(rank_values)
     top_gene = selected.sort_values("assoc_resid_score", ascending=False).head(1)
     top_locus = locus_table.sort_values("locus_score", ascending=False).head(1)
     return {
@@ -418,9 +545,10 @@ def summarize_module_distribution(
         "raw_gene_stat": sqrt_n_mean_stat(raw_values),
         "capped_gene_stat": sqrt_n_mean_stat(capped_values),
         "locus_robust_stat": locus_robust_stat(locus_scores),
+        "positive_locus_robust_stat": positive_locus_robust_stat(locus_scores),
         "ripple_d_stat": ripple_d_value,
         "moderate_locus_burden": moderate_locus_burden(selected, config),
-        "rank_enrichment_stat": rank_stat,
+        "rank_locus_enrichment_stat": rank_stat,
         "leave_top1_gene_stat": leave_top_gene_stat(capped_values, k=1),
         "leave_top5_gene_stat": leave_top_gene_stat(capped_values, k=5),
         "leave_top10_gene_stat": leave_top_gene_stat(capped_values, k=10),
@@ -438,9 +566,12 @@ def summarize_module_distribution(
 def _null_stats_from_loci(locus_background: pd.DataFrame, sampled_loci: Sequence[str], config: RippleDConfig) -> dict[str, float]:
     rows = locus_background.loc[locus_background["locus_id"].isin(set(sampled_loci))]
     scores = rows["genome_locus_score"].to_numpy(dtype=float)
+    rank_fractions = rows["score_rank_fraction"].to_numpy(dtype=float)
     return {
         "locus_robust_stat": locus_robust_stat(scores),
+        "positive_locus_robust_stat": positive_locus_robust_stat(scores),
         "ripple_d_stat": ripple_d_stat(scores, config),
+        "rank_locus_enrichment_stat": rank_locus_enrichment_stat(rank_fractions),
         "moderate_locus_burden": float(rows["moderate_locus"].sum()),
         "leave_top1_locus_stat": leave_top_locus_stat(pd.Series(scores), k=1),
     }
@@ -459,7 +590,9 @@ def _locus_matched_nulls(
 ) -> dict[str, np.ndarray]:
     out = {
         "locus_robust_stat": np.empty(n_null, dtype=float),
+        "positive_locus_robust_stat": np.empty(n_null, dtype=float),
         "ripple_d_stat": np.empty(n_null, dtype=float),
+        "rank_locus_enrichment_stat": np.empty(n_null, dtype=float),
         "moderate_locus_burden": np.empty(n_null, dtype=float),
         "leave_top1_locus_stat": np.empty(n_null, dtype=float),
     }
@@ -555,6 +688,11 @@ def _filter_pool(pool: np.ndarray, exclude: set[int]) -> np.ndarray:
     return np.asarray([int(idx) for idx in pool if int(idx) not in exclude], dtype=int)
 
 
+def _filter_pool_with_level(pool: np.ndarray, exclude: set[int]) -> tuple[np.ndarray, str]:
+    filtered = _filter_pool(pool, exclude)
+    return filtered, "exact"
+
+
 def _sample_index_from_pools(
     observed_idx: int,
     *,
@@ -565,17 +703,23 @@ def _sample_index_from_pools(
     all_indices: np.ndarray,
     exclude: set[int],
     rng: np.random.Generator,
-) -> int:
+) -> tuple[int, str, int]:
     match_bin = str(match_bin_arr[int(observed_idx)])
-    candidates = _filter_pool(match_pools_idx.get(match_bin, np.array([], dtype=int)), exclude)
+    exact_pool = match_pools_idx.get(match_bin, np.array([], dtype=int))
+    candidates = _filter_pool(exact_pool, exclude)
+    level = "exact"
     if candidates.size == 0:
         degree_bin = int(degree_bin_arr[int(observed_idx)])
-        candidates = _filter_pool(degree_pools_idx.get(degree_bin, np.array([], dtype=int)), exclude)
+        degree_pool = degree_pools_idx.get(degree_bin, np.array([], dtype=int))
+        candidates = _filter_pool(degree_pool, exclude)
+        level = "degree"
     if candidates.size == 0:
         candidates = _filter_pool(all_indices, exclude)
+        level = "global"
     if candidates.size == 0:
         candidates = all_indices
-    return int(rng.choice(candidates))
+        level = "all_with_reuse"
+    return int(rng.choice(candidates)), level, int(candidates.size)
 
 
 def _sample_locus_matched_indices_fast(
@@ -587,12 +731,17 @@ def _sample_locus_matched_indices_fast(
     degree_pools_idx: Mapping[int, np.ndarray],
     all_indices: np.ndarray,
     rng: np.random.Generator,
-) -> list[int]:
+    extra_exclude: set[int] | None = None,
+) -> tuple[list[int], dict[str, float]]:
     observed_set = {int(idx) for idx in observed_indices}
     used = set(observed_set)
+    if extra_exclude:
+        used.update(int(idx) for idx in extra_exclude)
     sampled: list[int] = []
+    counts = {"exact": 0, "degree": 0, "global": 0, "all_with_reuse": 0}
+    pool_sizes: list[int] = []
     for observed_idx in observed_indices:
-        picked = _sample_index_from_pools(
+        picked, level, pool_size = _sample_index_from_pools(
             int(observed_idx),
             match_bin_arr=match_bin_arr,
             degree_bin_arr=degree_bin_arr,
@@ -604,16 +753,88 @@ def _sample_locus_matched_indices_fast(
         )
         sampled.append(picked)
         used.add(picked)
-    return sampled
+        counts[level] = counts.get(level, 0) + 1
+        pool_sizes.append(pool_size)
+    denom = max(1, len(observed_indices))
+    audit = {
+        "null_exact_match_rate": counts.get("exact", 0) / denom,
+        "null_degree_fallback_rate": counts.get("degree", 0) / denom,
+        "null_global_fallback_rate": counts.get("global", 0) / denom,
+        "null_reuse_fallback_rate": counts.get("all_with_reuse", 0) / denom,
+        "min_match_pool_size": float(np.min(pool_sizes)) if pool_sizes else float("nan"),
+        "median_match_pool_size": float(np.median(pool_sizes)) if pool_sizes else float("nan"),
+    }
+    return sampled, audit
 
 
-def _stats_from_index_scores(scores: np.ndarray, moderate_flags: np.ndarray, indices: Sequence[int], config: RippleDConfig) -> dict[str, float]:
+def _sample_locus_subset_score(
+    locus_idx: int,
+    n_genes: int,
+    *,
+    locus_gene_score_pools: Mapping[int, np.ndarray],
+    locus_gene_raw_pools: Mapping[int, np.ndarray],
+    config: RippleDConfig,
+    rng: np.random.Generator,
+) -> tuple[float, float]:
+    score_pool = np.asarray(locus_gene_score_pools[int(locus_idx)], dtype=float)
+    raw_pool = np.asarray(locus_gene_raw_pools[int(locus_idx)], dtype=float)
+    n = max(1, int(n_genes))
+    replace = n > score_pool.size
+    positions = rng.choice(np.arange(score_pool.size), size=n, replace=replace)
+    subset_scores = score_pool[positions]
+    subset_raw = raw_pool[positions]
+    return (
+        collapse_values(subset_scores, collapse=config.locus_collapse),
+        float(((subset_raw > config.moderate_score_low) & (subset_raw < config.moderate_score_high)).any()),
+    )
+
+
+def _stats_from_index_scores(
+    scores: np.ndarray,
+    moderate_flags: np.ndarray,
+    rank_fraction_arr: np.ndarray,
+    indices: Sequence[int],
+    config: RippleDConfig,
+    *,
+    rng: np.random.Generator | None = None,
+    observed_gene_counts: Sequence[int] | None = None,
+    locus_gene_score_pools: Mapping[int, np.ndarray] | None = None,
+    locus_gene_raw_pools: Mapping[int, np.ndarray] | None = None,
+) -> dict[str, float]:
     idx = np.asarray(indices, dtype=int)
-    values = scores[idx]
+    if (
+        config.null_gene_subset_sampling
+        and
+        observed_gene_counts is not None
+        and locus_gene_score_pools is not None
+        and locus_gene_raw_pools is not None
+        and rng is not None
+    ):
+        sampled_scores: list[float] = []
+        sampled_moderate: list[float] = []
+        for locus_idx, n_genes in zip(idx, observed_gene_counts, strict=False):
+            score, moderate = _sample_locus_subset_score(
+                int(locus_idx),
+                int(n_genes),
+                locus_gene_score_pools=locus_gene_score_pools,
+                locus_gene_raw_pools=locus_gene_raw_pools,
+                config=config,
+                rng=rng,
+            )
+            sampled_scores.append(score)
+            sampled_moderate.append(moderate)
+        values = np.asarray(sampled_scores, dtype=float)
+        moderate_values = np.asarray(sampled_moderate, dtype=float)
+    else:
+        values = scores[idx]
+        moderate_values = moderate_flags[idx]
+    rank_values = rank_fraction_arr[idx]
     return {
         "locus_robust_stat": locus_robust_stat(values),
+        "positive_locus_robust_stat": positive_locus_robust_stat(values),
         "ripple_d_stat": ripple_d_stat(values, config),
-        "moderate_locus_burden": float(np.sum(moderate_flags[idx])),
+        "rank_locus_enrichment_stat": rank_locus_enrichment_stat(rank_values),
+        "moderate_locus_burden": float(np.sum(moderate_values)),
         "leave_top1_locus_stat": leave_top_locus_stat(pd.Series(values), k=1),
     }
 
@@ -624,22 +845,29 @@ def _locus_matched_nulls_fast(
     *,
     scores: np.ndarray,
     moderate_flags: np.ndarray,
+    rank_fraction_arr: np.ndarray,
     match_bin_arr: np.ndarray,
     degree_bin_arr: np.ndarray,
     match_pools_idx: Mapping[str, np.ndarray],
     degree_pools_idx: Mapping[int, np.ndarray],
     all_indices: np.ndarray,
+    observed_gene_counts: Sequence[int],
+    locus_gene_score_pools: Mapping[int, np.ndarray],
+    locus_gene_raw_pools: Mapping[int, np.ndarray],
     n_null: int,
     rng: np.random.Generator,
-) -> dict[str, np.ndarray]:
+) -> tuple[dict[str, np.ndarray], dict[str, float]]:
     out = {
         "locus_robust_stat": np.empty(n_null, dtype=float),
+        "positive_locus_robust_stat": np.empty(n_null, dtype=float),
         "ripple_d_stat": np.empty(n_null, dtype=float),
+        "rank_locus_enrichment_stat": np.empty(n_null, dtype=float),
         "moderate_locus_burden": np.empty(n_null, dtype=float),
         "leave_top1_locus_stat": np.empty(n_null, dtype=float),
     }
+    audits: list[dict[str, float]] = []
     for idx in range(n_null):
-        sampled = _sample_locus_matched_indices_fast(
+        sampled, audit = _sample_locus_matched_indices_fast(
             observed_indices,
             match_bin_arr=match_bin_arr,
             degree_bin_arr=degree_bin_arr,
@@ -648,10 +876,32 @@ def _locus_matched_nulls_fast(
             all_indices=all_indices,
             rng=rng,
         )
-        stats = _stats_from_index_scores(scores, moderate_flags, sampled, config)
+        audits.append(audit)
+        stats = _stats_from_index_scores(
+            scores,
+            moderate_flags,
+            rank_fraction_arr,
+            sampled,
+            config,
+            rng=rng,
+            observed_gene_counts=observed_gene_counts,
+            locus_gene_score_pools=locus_gene_score_pools,
+            locus_gene_raw_pools=locus_gene_raw_pools,
+        )
         for name, value in stats.items():
             out[name][idx] = value
-    return out
+    summary = {
+        key: float(np.nanmean([audit[key] for audit in audits])) if audits else float("nan")
+        for key in [
+            "null_exact_match_rate",
+            "null_degree_fallback_rate",
+            "null_global_fallback_rate",
+            "null_reuse_fallback_rate",
+            "min_match_pool_size",
+            "median_match_pool_size",
+        ]
+    }
+    return out, summary
 
 
 def _top_locus_conditioned_nulls_fast(
@@ -660,12 +910,16 @@ def _top_locus_conditioned_nulls_fast(
     *,
     scores: np.ndarray,
     moderate_flags: np.ndarray,
+    rank_fraction_arr: np.ndarray,
     score_rank_arr: np.ndarray,
     match_bin_arr: np.ndarray,
     degree_bin_arr: np.ndarray,
     match_pools_idx: Mapping[str, np.ndarray],
     degree_pools_idx: Mapping[int, np.ndarray],
     all_indices: np.ndarray,
+    observed_gene_counts: Sequence[int],
+    locus_gene_score_pools: Mapping[int, np.ndarray],
+    locus_gene_raw_pools: Mapping[int, np.ndarray],
     n_null: int,
     rng: np.random.Generator,
     top_fraction: float = 0.01,
@@ -678,23 +932,40 @@ def _top_locus_conditioned_nulls_fast(
     if len(observed_top) == 0 or top_indices.size == 0:
         return np.full(n_null, np.nan, dtype=float)
     observed_top_set = set(observed_top)
-    remaining = [int(idx) for idx in observed_indices if int(idx) not in observed_top_set]
+    observed_pairs = list(zip([int(idx) for idx in observed_indices], list(observed_gene_counts), strict=False))
+    top_counts = [int(count) for idx, count in observed_pairs if int(idx) in observed_top_set]
+    remaining_pairs = [(int(idx), int(count)) for idx, count in observed_pairs if int(idx) not in observed_top_set]
+    remaining = [idx for idx, _ in remaining_pairs]
+    remaining_counts = [count for _, count in remaining_pairs]
     out = np.empty(n_null, dtype=float)
     for idx in range(n_null):
-        forced = int(rng.choice(top_indices))
-        sampled = [forced]
-        sampled.extend(
-            _sample_locus_matched_indices_fast(
-                remaining,
-                match_bin_arr=match_bin_arr,
-                degree_bin_arr=degree_bin_arr,
-                match_pools_idx=match_pools_idx,
-                degree_pools_idx=degree_pools_idx,
-                all_indices=all_indices,
-                rng=rng,
-            )
+        replace_top = len(observed_top) > int(top_indices.size)
+        forced = rng.choice(top_indices, size=len(observed_top), replace=replace_top)
+        forced_list = [int(value) for value in np.atleast_1d(forced)]
+        sampled = list(forced_list)
+        remaining_sampled, _ = _sample_locus_matched_indices_fast(
+            remaining,
+            match_bin_arr=match_bin_arr,
+            degree_bin_arr=degree_bin_arr,
+            match_pools_idx=match_pools_idx,
+            degree_pools_idx=degree_pools_idx,
+            all_indices=all_indices,
+            rng=rng,
+            extra_exclude=set(forced_list),
         )
-        out[idx] = _stats_from_index_scores(scores, moderate_flags, sampled, config)["leave_top1_locus_stat"]
+        sampled.extend(remaining_sampled)
+        sampled_gene_counts = top_counts + remaining_counts
+        out[idx] = _stats_from_index_scores(
+            scores,
+            moderate_flags,
+            rank_fraction_arr,
+            sampled,
+            config,
+            rng=rng,
+            observed_gene_counts=sampled_gene_counts,
+            locus_gene_score_pools=locus_gene_score_pools,
+            locus_gene_raw_pools=locus_gene_raw_pools,
+        )["leave_top1_locus_stat"]
     return out
 
 
@@ -722,6 +993,9 @@ def _locus_score_permutation_nulls_fast(
 
 def classify_distributed_module(row: Mapping[str, object], config: RippleDConfig) -> str:
     locus_p = finite_or_nan(row.get("locus_robust_empirical_p"))
+    ripple_p = finite_or_nan(row.get("ripple_d_empirical_p"))
+    positive_p = finite_or_nan(row.get("positive_locus_empirical_p"))
+    rank_p = finite_or_nan(row.get("rank_locus_empirical_p"))
     moderate_p = finite_or_nan(row.get("moderate_locus_burden_empirical_p"))
     leave_p = finite_or_nan(row.get("leave_top1_locus_empirical_p"))
     raw_p = finite_or_nan(row.get("raw_gene_empirical_p"))
@@ -729,16 +1003,39 @@ def classify_distributed_module(row: Mapping[str, object], config: RippleDConfig
     top1 = finite_or_nan(row.get("top1_locus_contribution"))
     top5 = finite_or_nan(row.get("top5_locus_contribution"))
 
-    passes = (
-        locus_p < 0.05
-        and moderate_p < 0.10
-        and leave_p < 0.10
-        and n_eff >= config.effective_loci_target
+    locus_supported = locus_p < 0.05 or ripple_p < config.ripple_d_p_max
+    positive_supported = positive_p < config.positive_locus_p_max
+    rank_supported = rank_p < config.rank_locus_p_max
+    leave_supported = leave_p < 0.10
+    moderate_supported = moderate_p < 0.10
+    contribution_supported = (
+        n_eff >= config.effective_loci_target
         and top1 <= config.top1_contribution_max
         and top5 <= config.top5_contribution_max
     )
+    top1_not_dominant = top1 <= config.top1_contribution_max
+
+    passes = (
+        locus_p < 0.05
+        and ripple_p < config.ripple_d_p_max
+        and moderate_supported
+        and leave_supported
+        and contribution_supported
+        and (positive_supported or rank_supported)
+    )
     if passes:
         return "distributed_weak_signal_module_candidate"
+    if (
+        locus_supported
+        and top1_not_dominant
+        and n_eff >= config.effective_loci_target
+        and (positive_supported or rank_supported or leave_supported or moderate_supported)
+    ):
+        return "mixed_sparse_distributed_candidate"
+    if locus_supported and moderate_supported and top1_not_dominant:
+        return "moderate_locus_supported_module"
+    if locus_supported and rank_supported and top1_not_dominant:
+        return "rank_locus_supported_module"
     if raw_p < 0.05 and (top1 > config.top1_contribution_max or n_eff < config.effective_loci_target):
         return "top_locus_dominant_module"
     if raw_p < 0.05 and locus_p < 0.10:
@@ -757,13 +1054,23 @@ def ripple_d_module_tests(
     n_null: int = 200,
     seed: int = 20260713,
     return_null_details: bool = True,
+    precomputed_work: pd.DataFrame | None = None,
+    precomputed_locus_background: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[str, object]]:
     """Run fixed-library RIPPLE-D diagnostics."""
 
     config = config or RippleDConfig()
-    work = assign_pseudo_loci(scores, window_bp=config.locus_window_bp)
-    work = add_ripple_d_score_columns(work, config)
-    locus_background = build_locus_background(work, library, config)
+    if precomputed_work is None and precomputed_locus_background is None:
+        work, locus_background = prepare_locus_inputs(scores, library, config)
+    else:
+        if precomputed_work is None:
+            raise ValueError("precomputed_work must be supplied with precomputed_locus_background")
+        work = precomputed_work
+        locus_background = (
+            precomputed_locus_background
+            if precomputed_locus_background is not None
+            else build_locus_background(work, library, config)
+        )
     gene_to_row = {str(row.gene_symbol).upper(): row for row in work.itertuples(index=False)}
     rng = np.random.default_rng(seed)
     all_loci = locus_background["locus_id"].to_numpy(dtype=object)
@@ -774,6 +1081,7 @@ def ripple_d_module_tests(
     match_bin_arr = locus_background["match_bin"].astype(str).to_numpy(dtype=object)
     degree_bin_arr = locus_background["degree_bin"].to_numpy(dtype=int)
     score_rank_arr = locus_background["score_rank"].to_numpy(dtype=float)
+    score_rank_fraction_arr = locus_background["score_rank_fraction"].to_numpy(dtype=float)
     match_pools = {
         str(match_bin): group["locus_id"].to_numpy(dtype=object)
         for match_bin, group in locus_background.groupby("match_bin", observed=True)
@@ -793,6 +1101,16 @@ def ripple_d_module_tests(
     degree_pools_idx = {
         int(degree_bin): np.asarray([locus_id_to_index[str(locus)] for locus in pool], dtype=int)
         for degree_bin, pool in degree_pools.items()
+    }
+    locus_gene_score_pools = {
+        locus_id_to_index[str(locus_id)]: group["ripple_d_capped_score"].to_numpy(dtype=float)
+        for locus_id, group in work.groupby("locus_id", observed=True)
+        if str(locus_id) in locus_id_to_index
+    }
+    locus_gene_raw_pools = {
+        locus_id_to_index[str(locus_id)]: group["assoc_resid_score"].to_numpy(dtype=float)
+        for locus_id, group in work.groupby("locus_id", observed=True)
+        if str(locus_id) in locus_id_to_index
     }
 
     rows: list[dict[str, object]] = []
@@ -823,21 +1141,34 @@ def ripple_d_module_tests(
             rows.append({**base, "module_status": "not_tested_low_overlap", "module_label": "not_tested"})
             continue
 
-        observed = summarize_module_distribution(work, present, config)
+        observed = summarize_module_distribution(work, present, config, locus_background=locus_background)
         selected, locus_table = _module_locus_scores(work, present, config)
         observed_loci = locus_table["locus_id"].astype(str).tolist()
         observed_locus_indices = [locus_id_to_index[locus] for locus in observed_loci if locus in locus_id_to_index]
+        observed_gene_counts = [
+            int(count)
+            for locus, count in zip(
+                locus_table["locus_id"].astype(str),
+                locus_table["n_genes_in_locus"].astype(int),
+                strict=True,
+            )
+            if locus in locus_id_to_index
+        ]
         raw_gene_null = np.empty(n_null, dtype=float)
-        locus_nulls = _locus_matched_nulls_fast(
+        locus_nulls, locus_null_audit = _locus_matched_nulls_fast(
             observed_locus_indices,
             config,
             scores=genome_locus_scores,
             moderate_flags=moderate_flags,
+            rank_fraction_arr=score_rank_fraction_arr,
             match_bin_arr=match_bin_arr,
             degree_bin_arr=degree_bin_arr,
             match_pools_idx=match_pools_idx,
             degree_pools_idx=degree_pools_idx,
             all_indices=all_locus_indices,
+            observed_gene_counts=observed_gene_counts,
+            locus_gene_score_pools=locus_gene_score_pools,
+            locus_gene_raw_pools=locus_gene_raw_pools,
             n_null=n_null,
             rng=rng,
         )
@@ -846,12 +1177,16 @@ def ripple_d_module_tests(
             config,
             scores=genome_locus_scores,
             moderate_flags=moderate_flags,
+            rank_fraction_arr=score_rank_fraction_arr,
             score_rank_arr=score_rank_arr,
             match_bin_arr=match_bin_arr,
             degree_bin_arr=degree_bin_arr,
             match_pools_idx=match_pools_idx,
             degree_pools_idx=degree_pools_idx,
             all_indices=all_locus_indices,
+            observed_gene_counts=observed_gene_counts,
+            locus_gene_score_pools=locus_gene_score_pools,
+            locus_gene_raw_pools=locus_gene_raw_pools,
             n_null=n_null,
             rng=rng,
         )
@@ -881,10 +1216,30 @@ def ripple_d_module_tests(
                 locus_nulls["locus_robust_stat"],
                 observed["locus_robust_stat"],
             ),
+            "positive_locus_null_mean": float(np.nanmean(locus_nulls["positive_locus_robust_stat"])),
+            "positive_locus_null_sd": float(np.nanstd(locus_nulls["positive_locus_robust_stat"], ddof=1)),
+            "positive_locus_z": z_score(
+                observed["positive_locus_robust_stat"],
+                locus_nulls["positive_locus_robust_stat"],
+            ),
+            "positive_locus_empirical_p": empirical_upper(
+                locus_nulls["positive_locus_robust_stat"],
+                observed["positive_locus_robust_stat"],
+            ),
             "ripple_d_null_mean": float(np.nanmean(locus_nulls["ripple_d_stat"])),
             "ripple_d_null_sd": float(np.nanstd(locus_nulls["ripple_d_stat"], ddof=1)),
             "ripple_d_z": z_score(observed["ripple_d_stat"], locus_nulls["ripple_d_stat"]),
             "ripple_d_empirical_p": empirical_upper(locus_nulls["ripple_d_stat"], observed["ripple_d_stat"]),
+            "rank_locus_null_mean": float(np.nanmean(locus_nulls["rank_locus_enrichment_stat"])),
+            "rank_locus_null_sd": float(np.nanstd(locus_nulls["rank_locus_enrichment_stat"], ddof=1)),
+            "rank_locus_z": z_score(
+                observed["rank_locus_enrichment_stat"],
+                locus_nulls["rank_locus_enrichment_stat"],
+            ),
+            "rank_locus_empirical_p": empirical_upper(
+                locus_nulls["rank_locus_enrichment_stat"],
+                observed["rank_locus_enrichment_stat"],
+            ),
             "moderate_locus_burden_empirical_p": empirical_upper(
                 locus_nulls["moderate_locus_burden"],
                 observed["moderate_locus_burden"],
@@ -901,6 +1256,9 @@ def ripple_d_module_tests(
             "n_locus_matched_null": int(n_null),
             "n_top_locus_conditioned_null": int(np.isfinite(top_conditioned_null).sum()),
             "n_locus_score_permutation_null": int(n_null),
+            "null_gene_subset_sampling": bool(config.null_gene_subset_sampling),
+            "n_module_genes_per_locus": ",".join(str(count) for count in observed_gene_counts),
+            **locus_null_audit,
             "module_status": "negative",
             "module_label": "negative",
         }
@@ -920,13 +1278,24 @@ def ripple_d_module_tests(
                     "assoc_resid_score": finite_or_nan(detail.assoc_resid_score),
                     "ripple_d_capped_score": finite_or_nan(detail.ripple_d_capped_score),
                     "locus_score": finite_or_nan(detail.locus_score),
+                    "n_module_genes_in_locus": int(detail.n_genes_in_locus),
                 }
             )
         if return_null_details:
             for null_type, stat_name, values in [
                 ("raw_gene_random_null", "raw_gene_stat", raw_gene_null),
                 ("locus_matched_competitive_null", "locus_robust_stat", locus_nulls["locus_robust_stat"]),
+                (
+                    "locus_matched_competitive_null",
+                    "positive_locus_robust_stat",
+                    locus_nulls["positive_locus_robust_stat"],
+                ),
                 ("locus_matched_competitive_null", "ripple_d_stat", locus_nulls["ripple_d_stat"]),
+                (
+                    "locus_matched_competitive_null",
+                    "rank_locus_enrichment_stat",
+                    locus_nulls["rank_locus_enrichment_stat"],
+                ),
                 (
                     "locus_matched_competitive_null",
                     "moderate_locus_burden",
@@ -957,10 +1326,19 @@ def ripple_d_module_tests(
     modules = pd.DataFrame(rows)
     if not modules.empty and "locus_robust_empirical_p" in modules:
         modules["locus_robust_fdr"] = bh_fdr(modules["locus_robust_empirical_p"].to_numpy(dtype=float))
+        modules["positive_locus_fdr"] = bh_fdr(modules["positive_locus_empirical_p"].to_numpy(dtype=float))
         modules["ripple_d_fdr"] = bh_fdr(modules["ripple_d_empirical_p"].to_numpy(dtype=float))
+        modules["rank_locus_fdr"] = bh_fdr(modules["rank_locus_empirical_p"].to_numpy(dtype=float))
         modules = modules.sort_values(
-            ["module_status", "locus_robust_empirical_p", "ripple_d_empirical_p", "ripple_d_stat"],
-            ascending=[True, True, True, False],
+            [
+                "module_status",
+                "locus_robust_empirical_p",
+                "ripple_d_empirical_p",
+                "positive_locus_empirical_p",
+                "rank_locus_empirical_p",
+                "ripple_d_stat",
+            ],
+            ascending=[True, True, True, True, True, False],
         ).reset_index(drop=True)
         modules["ripple_d_module_rank"] = np.arange(1, len(modules) + 1)
 
@@ -974,7 +1352,23 @@ def ripple_d_module_tests(
         )
         if "module_status" in modules
         else 0,
+        "n_mixed_sparse_distributed_candidate": int(
+            modules["module_status"].eq("mixed_sparse_distributed_candidate").sum()
+        )
+        if "module_status" in modules
+        else 0,
+        "n_moderate_locus_supported_module": int(
+            modules["module_status"].eq("moderate_locus_supported_module").sum()
+        )
+        if "module_status" in modules
+        else 0,
+        "n_rank_locus_supported_module": int(modules["module_status"].eq("rank_locus_supported_module").sum())
+        if "module_status" in modules
+        else 0,
         "n_top_locus_dominant_module": int(modules["module_status"].eq("top_locus_dominant_module").sum())
+        if "module_status" in modules
+        else 0,
+        "n_sparse_locus_pathway_overlap": int(modules["module_status"].eq("sparse_locus_pathway_overlap").sum())
         if "module_status" in modules
         else 0,
         "n_raw_gene_set_enrichment_only": int(modules["module_status"].eq("raw_gene_set_enrichment_only").sum())
@@ -982,10 +1376,15 @@ def ripple_d_module_tests(
         else 0,
         "n_background_genes": int(work["gene_symbol"].nunique()),
         "n_background_loci": int(locus_background["locus_id"].nunique()),
+        "median_genes_per_locus": float(locus_background["n_locus_genes"].median()),
+        "p95_genes_per_locus": float(locus_background["n_locus_genes"].quantile(0.95)),
+        "max_genes_per_locus": int(locus_background["n_locus_genes"].max()),
+        "max_locus_span_bp": float((locus_background["locus_end"] - locus_background["locus_start"]).max()),
         "n_null": int(n_null),
         "score_cap": float(config.score_cap),
         "locus_window_bp": int(config.locus_window_bp),
         "locus_definition": f"gene_coordinate_pseudo_locus_pm_{config.locus_window_bp}bp",
         "null_details_returned": bool(return_null_details),
+        "null_gene_subset_sampling": bool(config.null_gene_subset_sampling),
     }
     return modules, pd.DataFrame(locus_rows), pd.DataFrame(null_rows), summary

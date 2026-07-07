@@ -7,6 +7,9 @@ from ripple.modules.distributed import (
     assign_pseudo_loci,
     classify_distributed_module,
     contribution_metrics,
+    positive_locus_robust_stat,
+    prepare_locus_inputs,
+    rank_locus_enrichment_stat,
     locus_robust_stat,
     ripple_d_module_tests,
     summarize_module_distribution,
@@ -70,6 +73,15 @@ def test_locus_collapse_uses_max_not_sum_for_same_locus():
 
     assert summary["n_loci"] == 4
     assert summary["locus_robust_stat"] == locus_robust_stat(np.array([2.0, 1.5, 1.5, 1.5]))
+    assert summary["positive_locus_robust_stat"] == positive_locus_robust_stat(np.array([2.0, 1.5, 1.5, 1.5]))
+
+
+def test_rank_locus_enrichment_stat_is_high_for_top_ranks():
+    top_enriched = rank_locus_enrichment_stat(np.array([0.01, 0.02, 0.10]))
+    depleted = rank_locus_enrichment_stat(np.array([0.80, 0.90, 0.95]))
+
+    assert top_enriched > depleted
+    assert top_enriched > 0.9
 
 
 def test_contribution_metrics_detect_single_locus_dominance():
@@ -83,6 +95,9 @@ def test_distributed_gate_classifies_sparse_and_distributed_rows():
     config = RippleDConfig()
     distributed = {
         "locus_robust_empirical_p": 0.02,
+        "ripple_d_empirical_p": 0.02,
+        "positive_locus_empirical_p": 0.02,
+        "rank_locus_empirical_p": 0.02,
         "moderate_locus_burden_empirical_p": 0.04,
         "leave_top1_locus_empirical_p": 0.08,
         "raw_gene_empirical_p": 0.01,
@@ -96,6 +111,24 @@ def test_distributed_gate_classifies_sparse_and_distributed_rows():
 
     assert classify_distributed_module(distributed, config) == "distributed_weak_signal_module_candidate"
     assert classify_distributed_module(sparse, config) == "top_locus_dominant_module"
+
+
+def test_tiered_classifier_reports_mixed_sparse_distributed_support():
+    config = RippleDConfig()
+    row = {
+        "locus_robust_empirical_p": 0.04,
+        "ripple_d_empirical_p": 0.04,
+        "positive_locus_empirical_p": 0.04,
+        "rank_locus_empirical_p": 0.20,
+        "moderate_locus_burden_empirical_p": 0.20,
+        "leave_top1_locus_empirical_p": 0.20,
+        "raw_gene_empirical_p": 0.01,
+        "n_effective_loci": 6.0,
+        "top1_locus_contribution": 0.30,
+        "top5_locus_contribution": 0.80,
+    }
+
+    assert classify_distributed_module(row, config) == "mixed_sparse_distributed_candidate"
 
 
 def test_empirical_upper_plus_one_for_ripple_d_nulls():
@@ -151,3 +184,109 @@ def test_ripple_d_module_tests_detects_distributed_moderate_signal():
     assert row["top1_locus_contribution"] <= 0.35
     assert row["module_status"] == "distributed_weak_signal_module_candidate"
 
+
+def test_null_preserves_module_gene_count_within_sampled_locus():
+    scores = pd.DataFrame(
+        {
+            "gene_symbol": ["M1", "B1", "B2", "B3", "B4", "B5", "C1", "C2", "C3", "C4"],
+            "assoc_resid_score": [1.5, 0.1, 0.1, 0.1, 30.0, 0.1, 0.0, 0.0, 0.0, 0.0],
+            "chrom": [1] * 10,
+            "gene_start": [1000, 10_000, 10_500, 11_000, 11_500, 12_000, 100_000, 200_000, 300_000, 400_000],
+            "gene_end": [1100, 10_100, 10_600, 11_100, 11_600, 12_100, 100_100, 200_100, 300_100, 400_100],
+            "graph_degree": [1] * 10,
+            "gene_length": [100] * 10,
+            "n_mapped_snps": [10] * 10,
+            "local_ld_score": [2.0] * 10,
+        }
+    )
+    library = AnchoredModuleLibrary(
+        gene_sets={"single_gene_module": {"M1", "C1", "C2", "C3", "C4"}},
+        module_source={"single_gene_module": "unit_test"},
+        annotation_source_type={"single_gene_module": "internal_support"},
+    )
+
+    modules, _, nulls, _ = ripple_d_module_tests(
+        scores,
+        library,
+        config=RippleDConfig(
+            locus_window_bp=200,
+            degree_bins=2,
+            property_bins=2,
+            null_gene_subset_sampling=True,
+        ),
+        n_null=80,
+        seed=101,
+        return_null_details=True,
+    )
+
+    row = modules.iloc[0]
+    locus_null = nulls.loc[
+        (nulls["null_type"].eq("locus_matched_competitive_null"))
+        & (nulls["statistic_name"].eq("locus_robust_stat"))
+    ]
+    assert row["n_module_genes_per_locus"].split(",")[0] == "1"
+    assert float(locus_null["statistic_value"].max()) < 20.0
+
+
+def test_moderate_locus_null_uses_configured_thresholds():
+    values = {f"G{i}": 0.0 for i in range(80)}
+    for idx in range(5):
+        values[f"G{idx}"] = 0.75
+    scores = synthetic_scores(values)
+    library = AnchoredModuleLibrary(
+        gene_sets={"low_moderate": {f"G{i}" for i in range(10)}},
+        module_source={"low_moderate": "unit_test"},
+        annotation_source_type={"low_moderate": "internal_support"},
+    )
+
+    modules, _, _, _ = ripple_d_module_tests(
+        scores,
+        library,
+        config=RippleDConfig(
+            moderate_score_low=0.5,
+            moderate_score_high=1.0,
+            locus_window_bp=500,
+            degree_bins=4,
+            property_bins=2,
+        ),
+        n_null=30,
+        seed=202,
+    )
+
+    row = modules.iloc[0]
+    assert row["moderate_locus_burden"] >= 5
+    assert np.isfinite(row["moderate_locus_burden_empirical_p"])
+
+
+def test_precomputed_locus_inputs_preserve_module_results():
+    values = {f"G{i}": 0.0 for i in range(80)}
+    for idx in range(6):
+        values[f"G{idx}"] = 2.0
+    scores = synthetic_scores(values)
+    library = AnchoredModuleLibrary(
+        gene_sets={"distributed": {f"G{i}" for i in range(10)}},
+        module_source={"distributed": "unit_test"},
+        annotation_source_type={"distributed": "internal_support"},
+    )
+    config = RippleDConfig(locus_window_bp=500, degree_bins=4, property_bins=2)
+
+    direct, _, _, _ = ripple_d_module_tests(scores, library, config=config, n_null=20, seed=303)
+    work, background = prepare_locus_inputs(scores, library, config)
+    precomputed, _, _, _ = ripple_d_module_tests(
+        scores,
+        library,
+        config=config,
+        n_null=20,
+        seed=303,
+        precomputed_work=work,
+        precomputed_locus_background=background,
+    )
+
+    columns = [
+        "module_status",
+        "locus_robust_empirical_p",
+        "ripple_d_empirical_p",
+        "positive_locus_empirical_p",
+        "rank_locus_empirical_p",
+    ]
+    pd.testing.assert_frame_equal(direct[columns], precomputed[columns])
