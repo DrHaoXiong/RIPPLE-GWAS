@@ -1582,6 +1582,9 @@ def ripple_d_module_tests(
         "n_tested_modules": int(modules["module_status"].ne("not_tested_low_overlap").sum())
         if "module_status" in modules
         else 0,
+        "n_not_tested_low_overlap": int(modules["module_status"].eq("not_tested_low_overlap").sum())
+        if "module_status" in modules
+        else 0,
         "n_distributed_weak_signal_module_candidate": int(
             modules["module_status"].eq("distributed_weak_signal_module_candidate").sum()
         )

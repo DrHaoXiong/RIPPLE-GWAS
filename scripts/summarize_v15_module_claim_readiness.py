@@ -20,7 +20,8 @@ STATUS_ORDER = {
     "sparse_locus_pathway_overlap": 5,
     "raw_gene_set_enrichment_only": 6,
     "null_degraded_unresolved": 7,
-    "negative": 8,
+    "not_tested_low_overlap": 8,
+    "negative": 9,
 }
 
 

@@ -70,6 +70,7 @@ module_label:
   - sparse_locus_pathway_overlap
   - raw_gene_set_enrichment_only
   - null_degraded_unresolved
+  - not_tested_low_overlap
   - negative
 forbidden_language:
   - causal disease topology
