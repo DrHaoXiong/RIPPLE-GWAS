@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Environments
+.venv/
+venv/
+env/
+.env
+
+# Local data and generated analysis outputs
+10_raw_data/
+20_processed_data/
+30_analysis/
+data/
+results/
+outputs/
+logs/
+*.npz
+*.npy
+*.h5
+*.h5ad
+*.rds
+*.parquet
+*.bed
+*.bim
+*.fam
+*.pgen
+*.pvar
+*.psam
+*.bgen
+*.sample
+*.vcf
+*.vcf.gz
+*.tsv.gz
+*.csv.gz
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

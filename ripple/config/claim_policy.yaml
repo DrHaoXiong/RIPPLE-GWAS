@@ -1,0 +1,136 @@
+thresholds:
+  final_z_threshold: 2.5
+  supportive_z_threshold: 2.0
+empirical_p:
+  formula: "(1 + exceedances_at_least_as_extreme_as_observed) / (1 + n_null)"
+  default_statistic_direction: greater_is_more_extreme
+claim_status:
+  - final_positive
+  - supportive
+  - negative
+  - not_tested
+exclusion_or_na_reason:
+  - none
+  - not_applicable
+  - insufficient_nulls
+  - missing_input
+  - poor_graph_coverage
+  - low_gene_overlap
+  - low_information_trait
+  - not_run
+  - excluded_region_sensitivity
+  - method_not_supported
+not_tested_reason:
+  - not_applicable
+  - missing_input
+  - not_run
+  - missing_required_input
+  - insufficient_graph_coverage
+  - insufficient_gene_overlap
+  - null_sd_zero
+  - not_applicable_to_graph_role
+  - not_run_v0_1
+  - computationally_deferred
+  - method_not_supported
+  - failed_qc
+  - deferred_to_submission_stage
+graph_role:
+  - primary
+  - sensitivity
+  - exploratory
+annotation_source_type:
+  - independent_external
+  - graph_construction_related
+  - internal_support
+statistic_direction:
+  - greater_is_more_extreme
+  - less_is_more_extreme
+  - two_sided
+allowed_strength:
+  - final
+  - exploratory
+  - supportive
+  - negative
+  - limitation
+module_label:
+  - post_hoc_candidate_only
+  - fixed_module_supported
+  - selection_calibrated_module
+  - calibrated_candidate_module
+  - degree_robust_candidate_module
+  - topology_specific_module
+  - no_local_module_support
+  - not_tested
+forbidden_language:
+  - causal disease topology
+  - causal network
+  - true disease module
+  - validated STRING topology
+  - STRING validates
+  - topology-specific discovery
+  - disease-specific topology
+  - drug target discovery
+  - therapeutic target
+context_check_language:
+  - module
+  - network
+  - diffusion
+  - graph-domain
+  - candidate
+  - prioritize
+module_layer_controlled_phrases:
+  - calibrated candidate module
+  - module discovery
+  - local module discovery
+  - disease module
+  - validated module
+  - validated disease module
+  - topology-specific module
+  - topology-specific discovery
+tier_interpretation:
+  TIER_0_gene_signal: gene-score pipeline signal
+  TIER_1_degree_calibrated_aggregation: degree-calibrated top-rank weak-signal aggregation
+  TIER_2_graph_domain_aggregation: graph-domain diffusion aggregation
+  TIER_3_topology_specific_support: topology-specific graph support
+  TIER_4_local_calibrated_modules: local calibrated candidate modules
+graph_claim_policy:
+  STRING_default:
+    graph_role: primary
+    allowed_claim_level: Tier 1-3
+  retina_string_min20:
+    graph_role: sensitivity
+    allowed_claim_level: Tier 2 graph-domain only
+  FVM_vascular_weighted:
+    graph_role: sensitivity
+    allowed_claim_level: graph-domain support only; no topology-specific claim unless preregistered graph-null support exists
+module_layer_policy:
+  tier_name: "Tier 4"
+  tier_description: "Local module nomination and module-level calibration"
+  empirical_p_formula: "(1 + number of null statistics at least as extreme as observed) / (1 + n_null)"
+  default_thresholds:
+    fixed_module_support_empirical_p: 0.05
+    selection_calibrated_empirical_p: 0.05
+    topology_specific_module_empirical_p: 0.05
+  module_status_levels:
+    post_hoc_candidate_only:
+      manuscript_role: "exploratory_follow_up"
+    fixed_module_supported:
+      manuscript_role: "supportive_only"
+    selection_calibrated_module:
+      manuscript_role: "module_level_final_positive"
+    topology_specific_module:
+      manuscript_role: "topology_specific_module_claim"
+    no_local_module_support:
+      manuscript_role: "negative_or_limitation"
+    not_tested:
+      manuscript_role: "not_tested"
+  multiple_testing:
+    full_reselection_null_controls: "max-module family under the tested trait, graph, score source, top-fraction grid, module filters, and module statistic"
+    fixed_module_support_controls: "fixed candidate module only; does not control full post hoc discovery"
+  upgrade_rules:
+    post_hoc_to_fixed_module_supported: "requires fixed-module empirical support"
+    fixed_to_selection_calibrated: "requires full reselection max-module empirical p below threshold"
+    selection_to_topology_specific: "requires module-level degree-preserving graph null support"
+  downgrade_rules:
+    full_reselection_empirical_p_ge_0_05: "downgrade to post_hoc_candidate_only or fixed_module_supported depending on fixed-module null"
+    degree_preserving_graph_null_negative: "no topology-specific module claim"
