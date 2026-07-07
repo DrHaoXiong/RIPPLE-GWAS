@@ -61,6 +61,12 @@ module_label:
   - topology_specific_module
   - no_local_module_support
   - not_tested
+  - raw_enrichment_component
+  - distributed_weak_signal_module_candidate
+  - top_locus_dominant_module
+  - sparse_locus_pathway_overlap
+  - raw_gene_set_enrichment_only
+  - negative
 forbidden_language:
   - causal disease topology
   - causal network
@@ -134,3 +140,27 @@ module_layer_policy:
   downgrade_rules:
     full_reselection_empirical_p_ge_0_05: "downgrade to post_hoc_candidate_only or fixed_module_supported depending on fixed-module null"
     degree_preserving_graph_null_negative: "no topology-specific module claim"
+  ripple_d_v1_3:
+    tier_name: "Tier 4D"
+    tier_description: "Locus-aware robust distributed weak-signal module diagnostics"
+    old_raw_statistic_role: "raw_enrichment_component"
+    primary_statistic: "RIPPLE-D locus-aware robust distributed module statistic"
+    locus_definition_default: "gene-coordinate pseudo-locus, +/-500kb merged intervals"
+    distributed_gate:
+      locus_robust_empirical_p_lt: 0.05
+      moderate_locus_burden_empirical_p_lt: 0.10
+      leave_top1_locus_empirical_p_lt: 0.10
+      n_effective_loci_gte: 5
+      top1_locus_contribution_lte: 0.35
+      top5_locus_contribution_lte: 0.70
+    module_status_levels:
+      distributed_weak_signal_module_candidate:
+        manuscript_role: "candidate distributed weak-signal module"
+      top_locus_dominant_module:
+        manuscript_role: "sparse/top-locus component; not distributed"
+      sparse_locus_pathway_overlap:
+        manuscript_role: "supportive only; likely sparse locus overlap"
+      raw_gene_set_enrichment_only:
+        manuscript_role: "raw enrichment only; no distributed claim"
+      negative:
+        manuscript_role: "negative_or_limitation"

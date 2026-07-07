@@ -20,12 +20,18 @@ aggregation under explicit calibration layers:
 - Claim-tier reporting that separates graph-domain aggregation from
   topology-specific discovery.
 - Anchored biological module diagnostics with robustness checks.
+- RIPPLE-D V1.3 diagnostics that separate raw gene-set enrichment from
+  locus-aware distributed weak-signal module evidence.
 
-The current module layer is under active review. Recent internal diagnostics
-suggest that some anchored module signals can be driven by a small number of
-top-ranked GWAS genes. Reviewers should pay particular attention to module
-leverage, top-locus dependence, and whether the proposed statistics truly
-capture distributed weak-signal architecture.
+The current module layer is under active review. Internal diagnostics suggested
+that some anchored module signals can be driven by a small number of top-ranked
+GWAS genes or loci. The V1.3 RIPPLE-D layer therefore keeps the old
+`sqrt(n) * mean` statistic as a raw enrichment component and adds locus-aware
+score capping, pseudo-locus collapse, effective-locus contribution diagnostics,
+leave-top-locus checks, moderate-locus burden, and locus-aware empirical nulls.
+Reviewers should pay particular attention to whether this redesign truly
+captures distributed weak-signal architecture rather than sparse top-locus
+overlap.
 
 ## Repository Contents
 
@@ -73,7 +79,9 @@ External reviewers are especially asked to inspect:
 4. Percolation and diffusion statistics.
 5. Anchored module statistics, top-gene leverage, and selection-aware
    calibration.
-6. Claim-tier policy and whether manuscript-facing language is appropriately
+6. RIPPLE-D locus-aware distributed module gates and whether they are
+   mathematically sufficient to demote top-locus artifacts.
+7. Claim-tier policy and whether manuscript-facing language is appropriately
    conservative.
 
 ## Status
