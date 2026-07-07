@@ -1,90 +1,49 @@
-# RIPPLE-GWAS
+# RIPPLE-GWAS Prototype
 
-RIPPLE-GWAS is a research prototype for calibration-first graph-domain analysis of
-GWAS summary statistics.
+Python prototype for RIPPLE-GWAS weak-signal graph aggregation and module diagnostics.
 
-The current public snapshot is intended for code review and methodological
-cross-review. It contains the core Python package, analysis scripts, and tests,
-but does not redistribute GWAS summary statistics, LD reference panels, STRING
-files, single-cell data, intermediate analysis outputs, or manuscript-private
-materials.
+Current module-layer development focus: **RIPPLE-D V1.4c**.
 
-## Current Positioning
+V1.4c is a diagnostic layer for separating sparse top-locus pathway overlap from candidate distributed weak-signal module evidence. It is not yet a manuscript-level validated module discovery claim layer.
 
-RIPPLE-GWAS tests whether weak gene-level GWAS signals show graph-domain
-aggregation under explicit calibration layers:
-
-- LD-aware gene-level scoring from summary statistics.
-- Technical residualization of gene-level association scores.
-- Degree-aware graph nulls and degree-preserving topology sensitivity.
-- Claim-tier reporting that separates graph-domain aggregation from
-  topology-specific discovery.
-- Anchored biological module diagnostics with robustness checks.
-- RIPPLE-D V1.3 diagnostics that separate raw gene-set enrichment from
-  locus-aware distributed weak-signal module evidence.
-
-The current module layer is under active review. Internal diagnostics suggested
-that some anchored module signals can be driven by a small number of top-ranked
-GWAS genes or loci. The V1.3 RIPPLE-D layer therefore keeps the old
-`sqrt(n) * mean` statistic as a raw enrichment component and adds locus-aware
-score capping, pseudo-locus collapse, effective-locus contribution diagnostics,
-leave-top-locus checks, moderate-locus burden, and locus-aware empirical nulls.
-Reviewers should pay particular attention to whether this redesign truly
-captures distributed weak-signal architecture rather than sparse top-locus
-overlap.
-
-## Repository Contents
-
-- `ripple/`: core Python package.
-- `scripts/`: analysis, audit, benchmark, and manuscript-support scripts.
-- `tests/`: unit and regression tests.
-- `ripple/config/claim_policy.yaml`: machine-readable claim thresholds and
-  language guardrails.
-
-## What Is Not Included
-
-The following are intentionally excluded from this public snapshot:
-
-- raw GWAS summary statistics;
-- 1000 Genomes / LD caches;
-- STRING or other graph reference downloads;
-- single-cell expression data;
-- analysis outputs under private `30_analysis`;
-- manuscript drafts and private review documents.
-
-Several scripts still contain default local paths used during development.
-Treat these as reproducibility scaffolds rather than portable defaults. For a
-fresh environment, pass explicit command-line paths to the relevant scripts.
-
-## Installation
+## Development environment
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+wsl -d Ubuntu
+source ~/miniforge3/etc/profile.d/conda.sh
+conda activate ripple
+cd /mnt/d/RIPPLE/RIPPLE_private/04_private_src/ripple_v1
+```
+
+## Intended install
+
+```bash
+pip install -e .
 pytest
 ```
 
-The development environment used Python 3.11. Some optional baseline scripts
-require additional external software such as R packages, MAGMA, PascalX, or
-dmGWAS-compatible tooling.
+## Current RIPPLE-D runner
 
-## Review Focus
+```bash
+python scripts/run_v14c_ripple_d_module_rescue.py \
+  --traits DR_MVP \
+  --n-null 200 \
+  --locus-window-grid 50000 100000 250000 500000 1000000 \
+  --resume
+```
 
-External reviewers are especially asked to inspect:
+Key V1.4c safeguards:
 
-1. LD-aware signed and unsigned gene-score construction.
-2. Null generation and whether each null preserves the intended structure.
-3. Residualization and degree-control strategy.
-4. Percolation and diffusion statistics.
-5. Anchored module statistics, top-gene leverage, and selection-aware
-   calibration.
-6. RIPPLE-D locus-aware distributed module gates and whether they are
-   mathematically sufficient to demote top-locus artifacts.
-7. Claim-tier policy and whether manuscript-facing language is appropriately
-   conservative.
+- module-gene-count-preserving locus nulls are required for manuscript-facing runs;
+- locus-membership rank evidence is reported separately from module-specific rank evidence;
+- distributed gates use module-specific rank evidence, not whole-locus membership rank alone;
+- null replacement sampling is audited with `null_with_replacement_rate` and `null_gene_count_match_degraded`;
+- annotation-density matching can be disabled for sensitivity with `--disable-annotation-matching`;
+- external LD-block or clumped locus definitions can be supplied through `--locus-id-column`.
 
-## Status
+## V1 principles
 
-This is not a stable release. It is a public code-review snapshot of an active
-methods project.
+- signed directional gene signal and unsigned association-strength signal are separate streams;
+- primary unsigned ranking uses technically residualized normal scores;
+- graph degree is controlled by nulls and sensitivity, not primary residualization;
+- null replicates must repeat the full observed pipeline.

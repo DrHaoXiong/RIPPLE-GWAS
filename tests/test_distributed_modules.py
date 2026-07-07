@@ -97,7 +97,7 @@ def test_distributed_gate_classifies_sparse_and_distributed_rows():
         "locus_robust_empirical_p": 0.02,
         "ripple_d_empirical_p": 0.02,
         "positive_locus_empirical_p": 0.02,
-        "rank_locus_empirical_p": 0.02,
+        "module_specific_rank_empirical_p": 0.02,
         "moderate_locus_burden_empirical_p": 0.04,
         "leave_top1_locus_empirical_p": 0.08,
         "raw_gene_empirical_p": 0.01,
@@ -119,7 +119,7 @@ def test_tiered_classifier_reports_mixed_sparse_distributed_support():
         "locus_robust_empirical_p": 0.04,
         "ripple_d_empirical_p": 0.04,
         "positive_locus_empirical_p": 0.04,
-        "rank_locus_empirical_p": 0.20,
+        "module_specific_rank_empirical_p": 0.20,
         "moderate_locus_burden_empirical_p": 0.20,
         "leave_top1_locus_empirical_p": 0.20,
         "raw_gene_empirical_p": 0.01,
@@ -287,6 +287,74 @@ def test_precomputed_locus_inputs_preserve_module_results():
         "locus_robust_empirical_p",
         "ripple_d_empirical_p",
         "positive_locus_empirical_p",
-        "rank_locus_empirical_p",
+        "module_specific_rank_empirical_p",
     ]
     pd.testing.assert_frame_equal(direct[columns], precomputed[columns])
+
+
+def test_locus_membership_rank_leakage_does_not_drive_module_specific_rank_support():
+    scores = pd.DataFrame(
+        {
+            "gene_symbol": ["A_MODULE_LOW", "B_NONMODULE_TOP", "C1", "C2", "C3", "C4", "C5", "C6"],
+            "assoc_resid_score": [0.1, 8.0, 0.2, 0.1, 0.0, -0.1, 0.0, 0.1],
+            "chrom": [1] * 8,
+            "gene_start": [1000, 1100, 2_000_000, 3_500_000, 5_000_000, 6_500_000, 8_000_000, 9_500_000],
+            "gene_end": [1050, 1150, 2_010_000, 3_510_000, 5_010_000, 6_510_000, 8_010_000, 9_510_000],
+            "graph_degree": [1] * 8,
+            "gene_length": [100] * 8,
+            "n_mapped_snps": [10] * 8,
+            "local_ld_score": [2.0] * 8,
+        }
+    )
+    library = AnchoredModuleLibrary(
+        gene_sets={"rank_leakage": {"A_MODULE_LOW", "C1", "C2", "C3", "C4"}},
+        module_source={"rank_leakage": "unit_test"},
+        annotation_source_type={"rank_leakage": "internal_support"},
+    )
+
+    modules, _, _, _ = ripple_d_module_tests(
+        scores,
+        library,
+        config=RippleDConfig(locus_window_bp=500, degree_bins=2, property_bins=1),
+        n_null=30,
+        seed=404,
+    )
+
+    row = modules.iloc[0]
+    assert row["locus_membership_rank_enrichment_stat"] > row["module_specific_rank_enrichment_stat"]
+    assert row["module_status"] != "module_specific_rank_supported_module"
+    assert row["module_status"] != "distributed_weak_signal_module_candidate"
+
+
+def test_gene_count_replacement_audit_marks_degraded_null():
+    scores = pd.DataFrame(
+        {
+            "gene_symbol": ["M1", "M2", "M3", "M4", "S1", "S2", "S3", "S4", "S5"],
+            "assoc_resid_score": [1.0, 1.1, 1.2, 1.3, 0.0, 0.1, 0.2, 0.0, -0.1],
+            "chrom": [1] * 9,
+            "gene_start": [1000, 1100, 1200, 1300, 2_000_000, 3_500_000, 5_000_000, 6_500_000, 8_000_000],
+            "gene_end": [1050, 1150, 1250, 1350, 2_010_000, 3_510_000, 5_010_000, 6_510_000, 8_010_000],
+            "graph_degree": [1] * 9,
+            "gene_length": [100] * 9,
+            "n_mapped_snps": [10] * 9,
+            "local_ld_score": [2.0] * 9,
+        }
+    )
+    library = AnchoredModuleLibrary(
+        gene_sets={"multi_gene_locus": {"M1", "M2", "M3", "M4", "S1"}},
+        module_source={"multi_gene_locus": "unit_test"},
+        annotation_source_type={"multi_gene_locus": "internal_support"},
+    )
+
+    modules, _, _, _ = ripple_d_module_tests(
+        scores,
+        library,
+        config=RippleDConfig(locus_window_bp=500, degree_bins=1, property_bins=1),
+        n_null=30,
+        seed=505,
+    )
+
+    row = modules.iloc[0]
+    assert row["null_with_replacement_rate"] > 0
+    assert row["null_loci_with_insufficient_gene_pool_rate"] > 0
+    assert bool(row["null_gene_count_match_degraded"])
