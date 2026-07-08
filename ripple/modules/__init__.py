@@ -21,10 +21,13 @@ from ripple.modules.discovery import (
 )
 from ripple.modules.distributed import (
     RippleDConfig,
+    add_module_redundancy_fields,
+    add_ripple_d_v16_claim_readiness,
     assign_predefined_loci,
     assign_pseudo_loci,
     classify_distributed_module,
     contribution_metrics,
+    external_locus_audit_table,
     locus_background_audit_table,
     locus_robust_stat,
     module_specific_rank_enrichment_stat,
@@ -34,13 +37,17 @@ from ripple.modules.distributed import (
     rank_locus_enrichment_stat,
     ripple_d_module_tests,
     ripple_d_stat,
+    ripple_d_v16_stat,
     summarize_module_distribution,
+    top_tail_diagnostics,
 )
 
 __all__ = [
     "AnchoredModuleLibrary",
     "DEFAULT_DR_GENE_SETS",
     "RippleDConfig",
+    "add_module_redundancy_fields",
+    "add_ripple_d_v16_claim_readiness",
     "assign_predefined_loci",
     "anchored_module_tests",
     "assign_pseudo_loci",
@@ -49,6 +56,7 @@ __all__ = [
     "classify_distributed_module",
     "contribution_metrics",
     "discover_local_modules",
+    "external_locus_audit_table",
     "gene_sets_to_library",
     "load_anchored_gene_set_library",
     "load_gene_sets",
@@ -65,7 +73,9 @@ __all__ = [
     "render_module_discovery_report",
     "ripple_d_module_tests",
     "ripple_d_stat",
+    "ripple_d_v16_stat",
     "run_local_module_discovery",
     "selection_aware_module_null",
     "summarize_module_distribution",
+    "top_tail_diagnostics",
 ]

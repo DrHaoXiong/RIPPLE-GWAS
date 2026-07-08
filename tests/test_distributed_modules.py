@@ -4,14 +4,19 @@ import pandas as pd
 from ripple.modules.anchored import AnchoredModuleLibrary, empirical_upper
 from ripple.modules.distributed import (
     RippleDConfig,
+    add_module_redundancy_fields,
+    add_ripple_d_v16_claim_readiness,
     assign_pseudo_loci,
     classify_distributed_module,
     contribution_metrics,
+    external_locus_audit_table,
     positive_locus_robust_stat,
     prepare_locus_inputs,
     rank_locus_enrichment_stat,
     locus_robust_stat,
     ripple_d_module_tests,
+    ripple_d_stat,
+    ripple_d_v16_stat,
     summarize_module_distribution,
 )
 
@@ -378,3 +383,138 @@ def test_gene_count_replacement_audit_marks_degraded_null():
     assert row["null_loci_with_insufficient_gene_pool_rate"] > 0
     assert bool(row["null_gene_count_match_degraded"])
     assert row["module_status"] == "null_degraded_unresolved"
+
+
+def test_v16_stat_adds_top5_penalty_without_changing_v15_stat():
+    config = RippleDConfig(top5_contribution_max=0.70)
+    scores = np.array([3.0, 3.0, 3.0, 3.0, 3.0, 0.1, 0.1, 0.1])
+
+    assert ripple_d_v16_stat(scores, config) < ripple_d_stat(scores, config)
+
+
+def test_v16_claim_readiness_downgrades_top_tail_artifact():
+    config = RippleDConfig()
+    modules = pd.DataFrame(
+        [
+            {
+                "module_name": "strong_artifact",
+                "module_status": "distributed_weak_signal_module_candidate",
+                "present_genes": "A,B,C,D,E,F,G,H",
+                "n_present": 8,
+                "n_loci": 8,
+                "ripple_d_v16_empirical_p": 0.001,
+                "locus_robust_empirical_p": 0.001,
+                "module_specific_rank_empirical_p": 0.001,
+                "positive_locus_empirical_p": 0.001,
+                "leave_top1_locus_empirical_p": 0.01,
+                "leave_top3_locus_empirical_p": 0.01,
+                "top_locus_conditioned_leave_top1_p": 0.01,
+                "top_locus_conditioned_leave_top3_p": 0.01,
+                "null_exact_match_rate": 1.0,
+                "null_global_fallback_rate": 0.0,
+                "null_reuse_fallback_rate": 0.0,
+                "null_with_replacement_rate": 0.0,
+                "min_match_pool_size": 50,
+                "null_loci_with_insufficient_gene_pool_rate": 0.0,
+                "ld_block_locus_sensitivity_status": "external_locus_column_used",
+                "pseudo_locus_window_stability_status": "passed",
+                "fraction_loci_with_uncapped_score_gt_3": 0.75,
+                "fraction_positive_signal_from_uncapped_gt_3": 0.80,
+                "n_loci_in_genome_top_1pct": 2,
+                "top5_locus_contribution": 0.60,
+                "n_loci_with_uncapped_score_gt_3": 6,
+            }
+        ]
+    )
+
+    out = add_ripple_d_v16_claim_readiness(modules, config)
+
+    assert out["v16_claim_status"].iloc[0] == "multi_strong_locus_pathway_overlap"
+    assert not bool(out["top_tail_pass"].iloc[0])
+
+
+def test_v16_claim_readiness_requires_full_library_q_values():
+    config = RippleDConfig()
+    rows = []
+    for idx in range(30):
+        rows.append(
+            {
+                "module_name": f"M{idx}",
+                "module_status": "distributed_weak_signal_module_candidate",
+                "present_genes": f"G{idx},H{idx},I{idx},J{idx},K{idx}",
+                "n_present": 5,
+                "n_loci": 5,
+                "ripple_d_v16_empirical_p": 0.05 if idx == 0 else 0.90,
+                "locus_robust_empirical_p": 0.05 if idx == 0 else 0.90,
+                "module_specific_rank_empirical_p": 0.05 if idx == 0 else 0.90,
+                "positive_locus_empirical_p": 0.05 if idx == 0 else 0.90,
+                "leave_top1_locus_empirical_p": 0.01,
+                "leave_top3_locus_empirical_p": 0.01,
+                "top_locus_conditioned_leave_top1_p": 0.01,
+                "top_locus_conditioned_leave_top3_p": 0.01,
+                "null_exact_match_rate": 1.0,
+                "null_global_fallback_rate": 0.0,
+                "null_reuse_fallback_rate": 0.0,
+                "null_with_replacement_rate": 0.0,
+                "min_match_pool_size": 50,
+                "null_loci_with_insufficient_gene_pool_rate": 0.0,
+                "ld_block_locus_sensitivity_status": "external_locus_column_used",
+                "pseudo_locus_window_stability_status": "passed",
+                "fraction_loci_with_uncapped_score_gt_3": 0.0,
+                "fraction_positive_signal_from_uncapped_gt_3": 0.0,
+                "n_loci_in_genome_top_1pct": 0,
+                "top5_locus_contribution": 0.50,
+                "n_loci_with_uncapped_score_gt_3": 0,
+            }
+        )
+    modules = pd.DataFrame(rows)
+
+    out = add_ripple_d_v16_claim_readiness(modules, config)
+
+    assert out.loc[out["module_name"].eq("M0"), "ripple_d_q_full_library"].iloc[0] > 0.10
+    assert not bool(out.loc[out["module_name"].eq("M0"), "multiplicity_pass"].iloc[0])
+
+
+def test_external_locus_audit_flags_cross_chrom_and_unmapped_loci():
+    work = pd.DataFrame(
+        {
+            "gene_symbol": ["A", "B", "C"],
+            "chrom": [1, 2, 1],
+            "gene_start": [100, 200, 500],
+            "gene_end": [150, 250, 550],
+            "locus_id": ["L1", "L1", "UNMAPPED:C"],
+        }
+    )
+
+    audit = external_locus_audit_table(work, locus_id_column="ld_block")
+
+    assert int(audit["n_cross_chrom_loci"].iloc[0]) == 1
+    assert audit["unmapped_locus_fraction"].iloc[0] > 0
+    assert not bool(audit["external_locus_audit_pass"].iloc[0])
+
+
+def test_redundancy_collapse_marks_overlapping_supportive_module():
+    modules = pd.DataFrame(
+        [
+            {
+                "module_name": "A",
+                "present_genes": "G1,G2,G3,G4",
+                "n_present": 4,
+                "ripple_d_v16_empirical_p": 0.001,
+                "module_specific_rank_empirical_p": 0.001,
+            },
+            {
+                "module_name": "B",
+                "present_genes": "G1,G2,G3,G5",
+                "n_present": 4,
+                "ripple_d_v16_empirical_p": 0.01,
+                "module_specific_rank_empirical_p": 0.01,
+            },
+        ]
+    )
+
+    out = add_module_redundancy_fields(modules)
+
+    b = out.loc[out["module_name"].eq("B")].iloc[0]
+    assert b["representative_module_in_cluster"] == "A"
+    assert b["redundancy_downgrade_reason"] == "overlapping_supportive_module"
