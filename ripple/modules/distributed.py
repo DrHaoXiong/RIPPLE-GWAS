@@ -439,10 +439,32 @@ def top_tail_diagnostics(
 
 
 def leave_top_locus_stat(locus_scores: pd.Series, *, k: int) -> float:
-    values = pd.to_numeric(locus_scores, errors="coerce").dropna().sort_values(ascending=False)
-    if values.shape[0] <= int(k):
+    return leave_top_locus_values(locus_scores, k=k)
+
+
+def leave_top_locus_values(locus_scores: np.ndarray | pd.Series, *, k: int) -> float:
+    values = np.asarray(locus_scores, dtype=float)
+    values = values[np.isfinite(values)]
+    k = int(k)
+    if values.size <= k:
         return float("nan")
-    return locus_robust_stat(values.iloc[int(k) :].to_numpy(dtype=float))
+    if k <= 0:
+        return locus_robust_stat(values)
+    kept = np.partition(values, values.size - k)[0 : values.size - k]
+    return locus_robust_stat(kept)
+
+
+def leave_top_locus_stats(values: np.ndarray | pd.Series, ks: Sequence[int] = (1, 3, 5)) -> dict[int, float]:
+    arr = np.asarray(values, dtype=float)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return {int(k): float("nan") for k in ks}
+    ordered = np.sort(arr)[::-1]
+    out: dict[int, float] = {}
+    for k in ks:
+        k_int = int(k)
+        out[k_int] = locus_robust_stat(ordered[k_int:]) if ordered.size > k_int else float("nan")
+    return out
 
 
 def leave_top_gene_stat(values: np.ndarray | pd.Series, *, k: int) -> float:
@@ -1010,7 +1032,12 @@ def _sample_locus_subset_score(
     n = max(1, int(n_genes))
     insufficient = n > score_pool.size
     replace = insufficient
-    positions = rng.choice(np.arange(score_pool.size), size=n, replace=replace)
+    if n == 1:
+        positions = np.array([int(rng.integers(score_pool.size))], dtype=int)
+    elif replace:
+        positions = rng.integers(score_pool.size, size=n, endpoint=False)
+    else:
+        positions = rng.choice(score_pool.size, size=n, replace=False)
     subset_scores = score_pool[positions]
     subset_raw = raw_pool[positions]
     return (
@@ -1079,6 +1106,7 @@ def _stats_from_index_scores(
         values = scores[idx]
         moderate_values = moderate_flags[idx]
     rank_values = rank_fraction_arr[idx]
+    leave_stats = leave_top_locus_stats(values, ks=(1, 3, 5))
     return {
         "locus_robust_stat": locus_robust_stat(values),
         "positive_locus_robust_stat": positive_locus_robust_stat(values),
@@ -1087,9 +1115,9 @@ def _stats_from_index_scores(
         "locus_membership_rank_enrichment_stat": rank_locus_enrichment_stat(rank_values),
         "module_specific_rank_enrichment_stat": module_specific_rank_enrichment_stat(values, background_scores),
         "moderate_locus_burden": float(np.sum(moderate_values)),
-        "leave_top1_locus_stat": leave_top_locus_stat(pd.Series(values), k=1),
-        "leave_top3_locus_stat": leave_top_locus_stat(pd.Series(values), k=3),
-        "leave_top5_locus_stat": leave_top_locus_stat(pd.Series(values), k=5),
+        "leave_top1_locus_stat": leave_stats[1],
+        "leave_top3_locus_stat": leave_stats[3],
+        "leave_top5_locus_stat": leave_stats[5],
     }
 
 
