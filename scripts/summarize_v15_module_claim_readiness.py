@@ -48,8 +48,20 @@ def read_table(path: Path) -> pd.DataFrame:
 
 
 def status_for_group(group: pd.DataFrame, min_stable_windows: int) -> pd.Series:
+    external_mask = (
+        group.get("ld_block_locus_sensitivity_status", pd.Series("", index=group.index))
+        .astype(str)
+        .str.contains("external_locus_column_used", na=False)
+        | group.get("locus_definition", pd.Series("", index=group.index))
+        .astype(str)
+        .str.contains("external_locus_column|ldetect|ld_block|clumped", case=False, regex=True, na=False)
+    )
     strong = group.loc[group["module_status"].eq(STRONG_STATUS)].copy()
-    windows = sorted(str(value) for value in strong.get("analysis_window_label", pd.Series(dtype=str)).dropna().unique())
+    pseudo_strong = strong.loc[~external_mask.reindex(strong.index, fill_value=False)]
+    external_strong = strong.loc[external_mask.reindex(strong.index, fill_value=False)]
+    windows = sorted(
+        str(value) for value in pseudo_strong.get("analysis_window_label", pd.Series(dtype=str)).dropna().unique()
+    )
     locus_defs = sorted(str(value) for value in group.get("locus_definition", pd.Series(dtype=str)).dropna().unique())
     annotation_values = sorted(str(value) for value in group.get("annotation_matching_enabled", pd.Series(dtype=str)).dropna().unique())
     degraded = group.get("null_gene_count_match_degraded", pd.Series(False, index=group.index)).astype(str).str.lower().isin(
@@ -61,11 +73,13 @@ def status_for_group(group: pd.DataFrame, min_stable_windows: int) -> pd.Series:
     replacement_rate = pd.to_numeric(group.get("null_with_replacement_rate", pd.Series([np.nan])), errors="coerce")
 
     pseudo_status = "stable" if len(windows) >= min_stable_windows else ("single_window_only" if len(windows) == 1 else "failed")
-    ld_status = (
-        "passed"
-        if any("external_locus_column" in str(value) for value in locus_defs) and not strong.empty
-        else "not_tested"
-    )
+    has_external_run = bool(external_mask.any())
+    if not has_external_run:
+        ld_status = "not_tested"
+    elif external_strong.empty:
+        ld_status = "failed"
+    else:
+        ld_status = "passed"
     annotation_status = (
         "passed"
         if {"True", "False"}.issubset(set(annotation_values)) and not strong.empty
