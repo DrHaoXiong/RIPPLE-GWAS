@@ -475,6 +475,98 @@ def test_v16_claim_readiness_requires_full_library_q_values():
     assert not bool(out.loc[out["module_name"].eq("M0"), "multiplicity_pass"].iloc[0])
 
 
+def test_v16b_balanced_null_quality_requires_multiplicity_for_high_confidence():
+    config = RippleDConfig()
+    rows = []
+    for idx in range(30):
+        rows.append(
+            {
+                "module_name": f"M{idx}",
+                "module_status": "distributed_weak_signal_module_candidate",
+                "present_genes": f"G{idx},H{idx},I{idx},J{idx},K{idx}",
+                "n_present": 5,
+                "n_loci": 5,
+                "ripple_d_v16_empirical_p": 0.001 if idx == 0 else 0.90,
+                "locus_robust_empirical_p": 0.001 if idx == 0 else 0.90,
+                "module_specific_rank_empirical_p": 0.001 if idx == 0 else 0.90,
+                "positive_locus_empirical_p": 0.001 if idx == 0 else 0.90,
+                "leave_top1_locus_empirical_p": 0.01,
+                "leave_top3_locus_empirical_p": 0.01,
+                "top_locus_conditioned_leave_top1_p": 0.01,
+                "top_locus_conditioned_leave_top3_p": 0.01,
+                "null_exact_match_rate": 1.0,
+                "null_global_fallback_rate": 0.0,
+                "null_reuse_fallback_rate": 0.0,
+                "null_with_replacement_rate": 0.0,
+                "min_match_pool_size": 12,
+                "median_match_pool_size": 25,
+                "null_loci_with_insufficient_gene_pool_rate": 0.0,
+                "ld_block_locus_sensitivity_status": "external_locus_column_used",
+                "pseudo_locus_window_stability_status": "not_tested",
+                "fraction_loci_with_uncapped_score_gt_3": 0.0,
+                "fraction_positive_signal_from_uncapped_gt_3": 0.0,
+                "n_loci_in_genome_top_1pct": 0,
+                "top5_locus_contribution": 0.50,
+                "n_loci_with_uncapped_score_gt_3": 0,
+            }
+        )
+    modules = pd.DataFrame(rows)
+
+    out = add_ripple_d_v16_claim_readiness(modules, config)
+    first = out.loc[out["module_name"].eq("M0")].iloc[0]
+
+    assert not bool(first["null_quality_strict_pass"])
+    assert bool(first["null_quality_balanced_pass"])
+    assert bool(first["multiplicity_pass"])
+    assert first["v16_claim_status"] == "exploratory_locus_distributed_candidate"
+    assert first["v16b_claim_status"] == "high_confidence_diagnostic_candidate"
+
+
+def test_v16b_balanced_high_confidence_still_requires_multiplicity():
+    config = RippleDConfig()
+    rows = []
+    for idx in range(30):
+        rows.append(
+            {
+                "module_name": f"M{idx}",
+                "module_status": "distributed_weak_signal_module_candidate",
+                "present_genes": f"G{idx},H{idx},I{idx},J{idx},K{idx}",
+                "n_present": 5,
+                "n_loci": 5,
+                "ripple_d_v16_empirical_p": 0.05 if idx == 0 else 0.90,
+                "locus_robust_empirical_p": 0.05 if idx == 0 else 0.90,
+                "module_specific_rank_empirical_p": 0.05 if idx == 0 else 0.90,
+                "positive_locus_empirical_p": 0.05 if idx == 0 else 0.90,
+                "leave_top1_locus_empirical_p": 0.01,
+                "leave_top3_locus_empirical_p": 0.01,
+                "top_locus_conditioned_leave_top1_p": 0.01,
+                "top_locus_conditioned_leave_top3_p": 0.01,
+                "null_exact_match_rate": 1.0,
+                "null_global_fallback_rate": 0.0,
+                "null_reuse_fallback_rate": 0.0,
+                "null_with_replacement_rate": 0.0,
+                "min_match_pool_size": 12,
+                "median_match_pool_size": 25,
+                "null_loci_with_insufficient_gene_pool_rate": 0.0,
+                "ld_block_locus_sensitivity_status": "external_locus_column_used",
+                "pseudo_locus_window_stability_status": "not_tested",
+                "fraction_loci_with_uncapped_score_gt_3": 0.0,
+                "fraction_positive_signal_from_uncapped_gt_3": 0.0,
+                "n_loci_in_genome_top_1pct": 0,
+                "top5_locus_contribution": 0.50,
+                "n_loci_with_uncapped_score_gt_3": 0,
+            }
+        )
+    modules = pd.DataFrame(rows)
+
+    out = add_ripple_d_v16_claim_readiness(modules, config)
+    first = out.loc[out["module_name"].eq("M0")].iloc[0]
+
+    assert bool(first["null_quality_balanced_pass"])
+    assert not bool(first["multiplicity_pass"])
+    assert first["v16b_claim_status"] == "exploratory_locus_distributed_candidate"
+
+
 def test_external_locus_audit_flags_cross_chrom_and_unmapped_loci():
     work = pd.DataFrame(
         {

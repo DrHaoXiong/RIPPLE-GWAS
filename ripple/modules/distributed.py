@@ -31,6 +31,10 @@ DEFAULT_RANK_LOCUS_P_MAX = 0.05
 DEFAULT_NULL_EXACT_MATCH_RATE_MIN = 0.80
 DEFAULT_NULL_GLOBAL_FALLBACK_RATE_MAX = 0.05
 DEFAULT_MIN_MATCH_POOL_SIZE = 20
+DEFAULT_BALANCED_MIN_MATCH_POOL_SIZE = 10
+DEFAULT_BALANCED_MEDIAN_MATCH_POOL_SIZE = 20
+DEFAULT_BALANCED_NULL_WITH_REPLACEMENT_RATE_MAX = 0.01
+DEFAULT_BALANCED_HIGH_CONFIDENCE_MAX_LOCI = 60
 DEFAULT_NULL_INSUFFICIENT_GENE_POOL_RATE_MAX = 0.05
 DEFAULT_TOP_TAIL_FRACTION_LOCI_GT3_MAX = 0.35
 DEFAULT_TOP_TAIL_SIGNAL_GT3_MAX = 0.50
@@ -64,6 +68,10 @@ class RippleDConfig:
     null_exact_match_rate_min: float = DEFAULT_NULL_EXACT_MATCH_RATE_MIN
     null_global_fallback_rate_max: float = DEFAULT_NULL_GLOBAL_FALLBACK_RATE_MAX
     min_match_pool_size: int = DEFAULT_MIN_MATCH_POOL_SIZE
+    balanced_min_match_pool_size: int = DEFAULT_BALANCED_MIN_MATCH_POOL_SIZE
+    balanced_median_match_pool_size: int = DEFAULT_BALANCED_MEDIAN_MATCH_POOL_SIZE
+    balanced_null_with_replacement_rate_max: float = DEFAULT_BALANCED_NULL_WITH_REPLACEMENT_RATE_MAX
+    balanced_high_confidence_max_loci: int = DEFAULT_BALANCED_HIGH_CONFIDENCE_MAX_LOCI
     null_insufficient_gene_pool_rate_max: float = DEFAULT_NULL_INSUFFICIENT_GENE_POOL_RATE_MAX
     top_tail_fraction_loci_gt3_max: float = DEFAULT_TOP_TAIL_FRACTION_LOCI_GT3_MAX
     top_tail_signal_gt3_max: float = DEFAULT_TOP_TAIL_SIGNAL_GT3_MAX
@@ -1579,11 +1587,14 @@ def merge_annotation_sensitivity_fields(
     if annotation_free_modules is None or annotation_free_modules.empty:
         out["annotation_sensitivity_pass"] = False
         out["annotation_sensitivity_status"] = "not_tested"
+        out["annotation_sensitivity_balanced_pass"] = False
+        out["annotation_sensitivity_balanced_status"] = "not_tested"
         return out
     keep = [
         "module_name",
         "module_status",
         "v16_claim_status",
+        "v16b_claim_status",
         "ripple_d_v16_empirical_p",
         "ripple_d_empirical_p",
         "module_specific_rank_empirical_p",
@@ -1605,6 +1616,26 @@ def merge_annotation_sensitivity_fields(
         out["annotation_sensitivity_pass"],
         "passed",
         np.where(free_status.astype(str).eq("") | free_status.isna(), "not_tested", "failed"),
+    )
+    balanced_status = out.get(
+        "annotation_free_v16b_claim_status",
+        out.get("annotation_free_v16_claim_status", out.get("annotation_free_module_status", pd.Series("", index=out.index))),
+    )
+    out["annotation_sensitivity_balanced_pass"] = balanced_status.astype(str).isin(
+        {
+            "manuscript_ready_distributed_candidate",
+            "high_confidence_diagnostic_candidate",
+            "exploratory_locus_distributed_candidate",
+            "distributed_weak_signal_module_candidate",
+            "mixed_sparse_distributed_candidate",
+            "moderate_locus_supported_module",
+            "module_specific_rank_supported_module",
+        }
+    )
+    out["annotation_sensitivity_balanced_status"] = np.where(
+        out["annotation_sensitivity_balanced_pass"],
+        "passed",
+        np.where(balanced_status.astype(str).eq("") | balanced_status.isna(), "not_tested", "failed"),
     )
     return out
 
@@ -1640,12 +1671,29 @@ def add_ripple_d_v16_claim_readiness(
         external_audit_pass = bool(external_locus_audit["external_locus_audit_pass"].iloc[0])
     else:
         external_audit_pass = True
-    out["null_quality_pass"] = (
+    strict_null_quality_pass = (
         (_series_float(out, "null_exact_match_rate", 0.0) >= config.null_exact_match_rate_min)
         & (_series_float(out, "null_global_fallback_rate", 1.0) <= config.null_global_fallback_rate_max)
         & (_series_float(out, "null_reuse_fallback_rate", 1.0) == 0.0)
         & (_series_float(out, "null_with_replacement_rate", 1.0) == 0.0)
         & (_series_float(out, "min_match_pool_size", 0.0) >= float(config.min_match_pool_size))
+        & (
+            _series_float(out, "null_loci_with_insufficient_gene_pool_rate", 1.0)
+            <= config.null_insufficient_gene_pool_rate_max
+        )
+    )
+    out["null_quality_strict_pass"] = strict_null_quality_pass
+    out["null_quality_pass"] = strict_null_quality_pass
+    out["null_quality_balanced_pass"] = (
+        (_series_float(out, "null_exact_match_rate", 0.0) >= config.null_exact_match_rate_min)
+        & (_series_float(out, "null_global_fallback_rate", 1.0) <= config.null_global_fallback_rate_max)
+        & (_series_float(out, "null_reuse_fallback_rate", 1.0) == 0.0)
+        & (
+            _series_float(out, "null_with_replacement_rate", 1.0)
+            <= config.balanced_null_with_replacement_rate_max
+        )
+        & (_series_float(out, "min_match_pool_size", 0.0) >= float(config.balanced_min_match_pool_size))
+        & (_series_float(out, "median_match_pool_size", 0.0) >= float(config.balanced_median_match_pool_size))
         & (
             _series_float(out, "null_loci_with_insufficient_gene_pool_rate", 1.0)
             <= config.null_insufficient_gene_pool_rate_max
@@ -1686,6 +1734,9 @@ def add_ripple_d_v16_claim_readiness(
         out["representative_module_in_cluster"].astype(str).eq(out["module_name"].astype(str))
         & (_series_float(out, "unique_locus_fraction", 0.0) >= config.unique_locus_fraction_min)
     )
+    out["v16b_broad_module_pass"] = (
+        _series_float(out, "n_loci", float("inf")) <= float(config.balanced_high_confidence_max_loci)
+    )
     distributed_evidence = out["module_status"].astype(str).isin(
         {
             "distributed_weak_signal_module_candidate",
@@ -1702,7 +1753,8 @@ def add_ripple_d_v16_claim_readiness(
         & out["multiplicity_pass"]
         & out["top_tail_pass"]
         & out["leave_topk_pass"]
-        & out["annotation_sensitivity_pass"]
+        & out["v16b_broad_module_pass"]
+        & out["annotation_sensitivity_balanced_pass"]
         & out["redundancy_pass"]
     )
     high_confidence_core = out["module_status"].astype(str).eq("distributed_weak_signal_module_candidate") | (
@@ -1763,6 +1815,71 @@ def add_ripple_d_v16_claim_readiness(
         reasons.append("none" if not failed else ";".join(failed))
     out["v16_downgrade_reason"] = reasons
     out["v16_evidence_tier"] = out["v16_claim_status"]
+
+    balanced_manuscript = (
+        out["module_status"].astype(str).eq("distributed_weak_signal_module_candidate")
+        & out["null_quality_balanced_pass"]
+        & out["external_locus_sensitivity_pass"]
+        & out["pseudo_window_stability_pass"]
+        & out["multiplicity_pass"]
+        & out["top_tail_pass"]
+        & out["leave_topk_pass"]
+        & out["annotation_sensitivity_pass"]
+        & out["redundancy_pass"]
+    )
+    balanced_high_confidence = (
+        distributed_evidence
+        & high_confidence_core
+        & out["null_quality_balanced_pass"]
+        & out["multiplicity_pass"]
+        & out["top_tail_pass"]
+        & out["leave_topk_pass"]
+        & out["v16b_broad_module_pass"]
+        & ~balanced_manuscript
+    )
+    balanced_exploratory = distributed_evidence & ~balanced_manuscript & ~balanced_high_confidence
+    out["v16b_claim_status"] = np.select(
+        [
+            out["module_status"].astype(str).eq("not_tested_low_overlap"),
+            top_tail_strong_failure,
+            balanced_manuscript,
+            balanced_high_confidence,
+            balanced_exploratory,
+            out["module_status"].astype(str).eq("top_locus_dominant_module"),
+            out["module_status"].astype(str).eq("raw_gene_set_enrichment_only"),
+        ],
+        [
+            "not_tested",
+            "multi_strong_locus_pathway_overlap",
+            "manuscript_ready_distributed_candidate",
+            "high_confidence_diagnostic_candidate",
+            "exploratory_locus_distributed_candidate",
+            "top_locus_dominant",
+            "raw_enrichment_only",
+        ],
+        default="negative",
+    )
+    v16b_gates = [
+        ("null_quality_balanced", "null_quality_balanced_pass"),
+        ("external_locus_sensitivity", "external_locus_sensitivity_pass"),
+        ("pseudo_window_stability", "pseudo_window_stability_pass"),
+        ("multiplicity", "multiplicity_pass"),
+        ("top_tail", "top_tail_pass"),
+        ("leave_topk", "leave_topk_pass"),
+        ("broad_module", "v16b_broad_module_pass"),
+        ("annotation_sensitivity_balanced", "annotation_sensitivity_balanced_pass"),
+        ("redundancy", "redundancy_pass"),
+    ]
+    v16b_reasons: list[str] = []
+    for row in out.itertuples(index=False):
+        failed = [
+            name
+            for name, column in v16b_gates
+            if not bool(getattr(row, column))
+        ]
+        v16b_reasons.append("none" if not failed else ";".join(failed))
+    out["v16b_downgrade_reason"] = v16b_reasons
+    out["v16b_evidence_tier"] = out["v16b_claim_status"]
     return out
 
 

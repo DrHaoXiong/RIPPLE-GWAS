@@ -93,14 +93,23 @@ def build_config(args: argparse.Namespace, *, annotation_matching_enabled: bool)
 
 def render_report(trait: str, claim: pd.DataFrame, out_dir: Path) -> str:
     counts = claim["v16_claim_status"].value_counts(dropna=False)
+    counts_v16b = (
+        claim["v16b_claim_status"].value_counts(dropna=False)
+        if "v16b_claim_status" in claim.columns
+        else pd.Series(dtype=int)
+    )
     lines = [
         f"# RIPPLE-D V1.6 claim-readiness report: {trait}",
         "",
         "V1.6 separates manuscript-ready candidates from high-confidence diagnostic and exploratory locus-distributed evidence.",
         "",
-        "## Claim Status Counts",
+        "## Claim Status Counts: V1.6 Strict",
         "",
         counts.to_string(),
+        "",
+        "## Claim Status Counts: V1.6b Balanced Null-Matching",
+        "",
+        counts_v16b.to_string() if not counts_v16b.empty else "Not available.",
         "",
         "## Top Candidate Rows",
         "",
@@ -117,7 +126,9 @@ def render_report(trait: str, claim: pd.DataFrame, out_dir: Path) -> str:
                 [
                     "module_name",
                     "v16_claim_status",
+                    "v16b_claim_status",
                     "v16_downgrade_reason",
+                    "v16b_downgrade_reason",
                     "ripple_d_q_full_library",
                     "module_specific_rank_q_full_library",
                     "ripple_d_v16_empirical_p",
@@ -206,12 +217,15 @@ def main() -> None:
             [
                 "module_id",
                 "module_name",
+                "null_quality_strict_pass",
                 "null_quality_pass",
+                "null_quality_balanced_pass",
                 "null_exact_match_rate",
                 "null_global_fallback_rate",
                 "null_reuse_fallback_rate",
                 "null_with_replacement_rate",
                 "min_match_pool_size",
+                "median_match_pool_size",
                 "null_loci_with_insufficient_gene_pool_rate",
             ],
         ),
@@ -290,7 +304,10 @@ def main() -> None:
                 "module_name",
                 "annotation_sensitivity_pass",
                 "annotation_sensitivity_status",
+                "annotation_sensitivity_balanced_pass",
+                "annotation_sensitivity_balanced_status",
                 "annotation_free_v16_claim_status",
+                "annotation_free_v16b_claim_status",
                 "annotation_free_module_status",
             ],
         ),
@@ -310,6 +327,9 @@ def main() -> None:
         "annotation_sensitivity": bool(args.annotation_sensitivity),
         "created_utc": datetime.now(UTC).isoformat(),
         "v16_claim_status_counts": claim["v16_claim_status"].value_counts(dropna=False).to_dict(),
+        "v16b_claim_status_counts": claim["v16b_claim_status"].value_counts(dropna=False).to_dict()
+        if "v16b_claim_status" in claim.columns
+        else {},
     }
     (reports_dir / f"{args.trait}.v16_ripple_d_summary.json").write_text(
         json.dumps(run_summary, indent=2, sort_keys=True),

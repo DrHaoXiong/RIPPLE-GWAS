@@ -58,6 +58,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument("--n-null", type=int, default=200)
+    parser.add_argument("--degree-bins", type=int, default=1)
+    parser.add_argument("--property-bins", type=int, default=1)
+    parser.add_argument(
+        "--annotation-matching",
+        choices=["on", "off"],
+        default="off",
+        help="Whether synthetic locus nulls include annotation-density matching.",
+    )
     parser.add_argument("--seed", type=int, default=20260719)
     parser.add_argument("--force", action="store_true")
     return parser.parse_args()
@@ -168,7 +176,15 @@ def tier_passed(status: str, expected: str) -> bool:
     raise ValueError(expected)
 
 
-def run_scenario(scenario: Scenario, *, n_null: int, seed: int) -> tuple[pd.DataFrame, dict[str, object]]:
+def run_scenario(
+    scenario: Scenario,
+    *,
+    n_null: int,
+    seed: int,
+    degree_bins: int,
+    property_bins: int,
+    annotation_matching_enabled: bool,
+) -> tuple[pd.DataFrame, dict[str, object]]:
     rng = np.random.default_rng(seed)
     scores = make_scores(rng)
     apply_effect(scores, scenario)
@@ -176,9 +192,9 @@ def run_scenario(scenario: Scenario, *, n_null: int, seed: int) -> tuple[pd.Data
         locus_id_column="synthetic_ld_block_id" if scenario.use_external_locus else None,
         locus_definition_name="synthetic_external_ld_blocks" if scenario.use_external_locus else None,
         locus_window_bp=500_000,
-        degree_bins=1,
-        property_bins=1,
-        annotation_matching_enabled=False,
+        degree_bins=degree_bins,
+        property_bins=property_bins,
+        annotation_matching_enabled=annotation_matching_enabled,
     )
     modules, locus_audit, _, summary = ripple_d_module_tests(
         scores,
@@ -195,15 +211,26 @@ def run_scenario(scenario: Scenario, *, n_null: int, seed: int) -> tuple[pd.Data
     modules["scenario_seed"] = int(seed)
     modules["scenario_n_null"] = int(n_null)
     modules["use_external_locus"] = bool(scenario.use_external_locus)
+    modules["degree_bins"] = int(degree_bins)
+    modules["property_bins"] = int(property_bins)
+    modules["annotation_matching_enabled"] = bool(annotation_matching_enabled)
     oracle = modules.loc[modules["module_name"].eq("oracle_module")].iloc[0]
     summary = {
         **summary,
         "scenario": scenario.name,
         "expected_min_tier": scenario.expected_min_tier,
         "oracle_v16_claim_status": str(oracle["v16_claim_status"]),
+        "oracle_v16b_claim_status": str(oracle.get("v16b_claim_status", oracle["v16_claim_status"])),
         "behavior_passed": tier_passed(str(oracle["v16_claim_status"]), scenario.expected_min_tier),
+        "v16b_behavior_passed": tier_passed(
+            str(oracle.get("v16b_claim_status", oracle["v16_claim_status"])),
+            scenario.expected_min_tier,
+        ),
         "seed": int(seed),
         "n_null": int(n_null),
+        "degree_bins": int(degree_bins),
+        "property_bins": int(property_bins),
+        "annotation_matching_enabled": bool(annotation_matching_enabled),
         "n_locus_audit_rows": int(len(locus_audit)),
     }
     return modules, summary
@@ -211,6 +238,7 @@ def run_scenario(scenario: Scenario, *, n_null: int, seed: int) -> tuple[pd.Data
 
 def render_report(summary: pd.DataFrame, out_dir: Path) -> str:
     failed = summary.loc[~summary["behavior_passed"]]
+    failed_v16b = summary.loc[~summary["v16b_behavior_passed"]]
     lines = [
         "# RIPPLE-D V1.6 synthetic RC validation",
         "",
@@ -223,12 +251,15 @@ def render_report(summary: pd.DataFrame, out_dir: Path) -> str:
                 "scenario",
                 "expected_min_tier",
                 "oracle_v16_claim_status",
+                "oracle_v16b_claim_status",
                 "behavior_passed",
+                "v16b_behavior_passed",
                 "n_null",
             ]
         ].to_string(index=False),
         "",
-        f"Failed expectations: {len(failed)}",
+        f"Failed expectations under V1.6 strict: {len(failed)}",
+        f"Failed expectations under V1.6b balanced: {len(failed_v16b)}",
         "",
         f"Detailed table: `{out_dir / 'tables' / 'v16_synthetic_validation.tsv'}`",
         f"Module details: `{out_dir / 'tables' / 'v16_synthetic_module_tests.tsv'}`",
@@ -241,8 +272,16 @@ def main() -> None:
     ensure_out_dir(args.out_dir, force=args.force)
     modules_all: list[pd.DataFrame] = []
     summaries: list[dict[str, object]] = []
+    annotation_matching_enabled = args.annotation_matching == "on"
     for idx, scenario in enumerate(SCENARIOS):
-        modules, summary = run_scenario(scenario, n_null=args.n_null, seed=args.seed + idx * 1009)
+        modules, summary = run_scenario(
+            scenario,
+            n_null=args.n_null,
+            seed=args.seed + idx * 1009,
+            degree_bins=args.degree_bins,
+            property_bins=args.property_bins,
+            annotation_matching_enabled=annotation_matching_enabled,
+        )
         modules_all.append(modules)
         oracle = modules.loc[modules["module_name"].eq("oracle_module")].iloc[0].to_dict()
         summaries.append({**summary, **oracle})
@@ -257,6 +296,9 @@ def main() -> None:
         "script_path": str(Path(__file__).resolve()),
         "out_dir": str(args.out_dir),
         "n_null": int(args.n_null),
+        "degree_bins": int(args.degree_bins),
+        "property_bins": int(args.property_bins),
+        "annotation_matching_enabled": bool(annotation_matching_enabled),
         "seed": int(args.seed),
     }
     (reports_dir / "v16_synthetic_validation_manifest.json").write_text(
