@@ -1,0 +1,9 @@
+audit_source	config_name	metric	false_positive_count	n_outer	fpr	binomial_95ci_low	binomial_95ci_high	mc_se	degree_bins	property_bins	annotation_matching_enabled	n_loci	genes_per_locus	n_modules	module_size	n_null	seed
+v16b_type1_null_matching_5x2_annotation_off_outer100_null200	5x2_ann_off	replicate_level_high_confidence_fpr	17	100	0.17	0.1089356611405993	0.2554800476760112	0.0375632799419859	5	2	False	520	2	80	24	200	20260722
+v16b_type1_null_matching_5x2_annotation_off_outer100_null200	5x2_ann_off	replicate_level_manuscript_ready_fpr	0	100	0.0	3.469446951953614e-18	0.0369934982069856	0.0	5	2	False	520	2	80	24	200	20260722
+v16b_type1_null_matching_5x2_annotation_off_outer100_null200	5x2_ann_off	replicate_level_exploratory_fpr	97	100	0.97	0.9154806357094724	0.9897454759759612	0.0170587221092319	5	2	False	520	2	80	24	200	20260722
+v16b_type1_null_matching_5x2_annotation_off_outer100_null200	5x2_ann_off	v16b_replicate_level_high_confidence_fpr	1	100	0.01	0.0017674320641406	0.0544861961787053	0.0099498743710662	5	2	False	520	2	80	24	200	20260722
+v16b_type1_null_matching_5x2_annotation_off_outer100_null200	5x2_ann_off	v16b_replicate_level_manuscript_ready_fpr	0	100	0.0	3.469446951953614e-18	0.0369934982069856	0.0	5	2	False	520	2	80	24	200	20260722
+v16b_type1_null_matching_5x2_annotation_off_outer100_null200	5x2_ann_off	v16b_replicate_level_exploratory_fpr	100	100	1.0	0.9630065017930144	1.0	0.0	5	2	False	520	2	80	24	200	20260722
+v16b_type1_null_matching_5x2_annotation_off_outer100_null200	5x2_ann_off	module_level_high_confidence_rate	25	100	0.003125				5	2	False	520	2	80	24	200	20260722
+v16b_type1_null_matching_5x2_annotation_off_outer100_null200	5x2_ann_off	v16b_module_level_high_confidence_rate	4	100	0.0005				5	2	False	520	2	80	24	200	20260722

@@ -1,0 +1,8 @@
+priority	review_area	question	code_focus
+P0	statistic_target	Does RIPPLE-D V1.6b still optimize a burden-like pathway score rather than a genuine distributed weak-signal module objective?	ripple/modules/distributed.py
+P0	locus_collapse	Does max(capped gene score) per locus discard useful multi-gene moderate signals or create winner-take-all behavior?	prepare_locus_inputs, locus collapse utilities, contribution diagnostics
+P0	null_matching	Do degree/property/locus matched nulls overmatch real biology or create hidden false-negative pressure?	locus matched null generation and V1.6b balanced null-quality gates
+P0	synthetic_real_gap	Why does V1.6b recover distributed synthetic signals but not DR-specific retinal modules in real DR_MVP?	scripts/run_v16_ripple_d_synthetic_validation.py and real-data V1.6b workflows
+P1	claim_policy	Are top-tail, leave-top-k, multiplicity and pseudo-window gates calibrated as discovery gates or are they too defensive for weak-signal biology?	add_ripple_d_v16_claim_readiness
+P1	module_definition	Should binary curated gene sets be replaced or supplemented by weighted cell-type/expression-supported modules?	DR-specific library construction and module membership handling
+P1	trait_specificity	Does residualizing DR against T2D/BMI remove confounding only, or also remove real DR biology mediated by diabetes pathways?	DR vs T2D/BMI specificity and residualized score workflow

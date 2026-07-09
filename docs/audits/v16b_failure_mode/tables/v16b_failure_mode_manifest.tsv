@@ -1,0 +1,6 @@
+table_file	description	contains_raw_gwas	contains_gene_scores	contains_private_paths	generated_at_utc
+tables/dr_mvp_v16b_high8_specificity_compact.tsv	Eight V1.6b sensitivity-completed candidates refined at n_null=5000 and contrasted against T2D/BMI and DR residualized against T2D/BMI.	false	false	false	2026-07-09T03:10:02+00:00
+tables/dr_specific_library_v1_cross_context_compact.tsv	Retinal-only DR-specific fixed-library V1.6b n5000 results across DR_MVP, DR residualized, T2D and BMI.	false	false	false	2026-07-09T03:10:02+00:00
+tables/v16b_synthetic_validation_compact.tsv	Synthetic V1.6b stress scenarios for top-locus artifacts, distributed signals, broad modules and sparse retinal modules.	false	false	false	2026-07-09T03:10:02+00:00
+tables/v16b_type1_calibration_compact.tsv	Diagnostic Type I calibration for V1.6b null matching, outer=100 and n_null=200.	false	false	false	2026-07-09T03:10:02+00:00
+tables/v16b_sensitivity_completion_compact.tsv	Annotation and pseudo-window sensitivity completion for 33 V1.6b high-confidence candidates.	false	false	false	2026-07-09T03:10:02+00:00
