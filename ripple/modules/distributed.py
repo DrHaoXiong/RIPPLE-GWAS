@@ -933,8 +933,10 @@ def _filter_pool(pool: np.ndarray, exclude: set[int]) -> np.ndarray:
 def _filter_pool_by_gene_count(pool: np.ndarray, locus_gene_count_arr: np.ndarray | None, min_gene_count: int) -> np.ndarray:
     if locus_gene_count_arr is None or min_gene_count <= 1 or pool.size == 0:
         return pool
-    filtered = np.asarray([int(idx) for idx in pool if int(locus_gene_count_arr[int(idx)]) >= int(min_gene_count)], dtype=int)
-    return filtered if filtered.size else pool
+    filtered = pool[locus_gene_count_arr[pool] >= int(min_gene_count)]
+    # An empty exact pool must trigger the documented degree/global fallback.
+    # Returning the unfiltered pool falsely labels an ineligible draw as exact.
+    return filtered
 
 
 def _filter_pool_with_level(pool: np.ndarray, exclude: set[int]) -> tuple[np.ndarray, str]:
@@ -973,7 +975,8 @@ def _sample_index_from_pools(
     if candidates.size == 0:
         candidates = all_indices
         level = "all_with_reuse"
-    return int(rng.choice(candidates)), level, int(candidates.size)
+    position = int(rng.integers(candidates.size))
+    return int(candidates[position]), level, int(candidates.size)
 
 
 def _sample_locus_matched_indices_fast(
@@ -1442,6 +1445,7 @@ def external_locus_audit_table(
                     "n_cross_chrom_loci": 0,
                     "missing_locus_fraction": 1.0,
                     "unmapped_locus_fraction": 1.0,
+                    "unblocked_locus_fraction": 1.0,
                     "max_locus_span_bp": float("nan"),
                     "median_genes_per_locus": float("nan"),
                     "max_genes_per_locus": float("nan"),
@@ -1449,9 +1453,12 @@ def external_locus_audit_table(
                 }
             ]
         )
-    locus = work["locus_id"].astype(str)
-    missing = locus.isna() | locus.eq("") | locus.str.lower().isin({"nan", "none"})
+    raw_locus = work["locus_id"]
+    locus = raw_locus.astype(str)
+    missing = raw_locus.isna() | locus.eq("") | locus.str.lower().isin({"nan", "none"})
     unmapped = locus.str.startswith("UNMAPPED:")
+    unblocked = locus.str.startswith("UNBLOCKED:")
+    unavailable = unmapped | unblocked
     grouped = work.assign(_locus_id=locus).groupby("_locus_id", observed=True)
     chrom_counts = grouped["chrom"].nunique(dropna=True) if "chrom" in work.columns else pd.Series(dtype=int)
     starts = grouped["gene_start"].min() if "gene_start" in work.columns else pd.Series(dtype=float)
@@ -1460,7 +1467,8 @@ def external_locus_audit_table(
     gene_counts = grouped["gene_symbol"].nunique() if "gene_symbol" in work.columns else pd.Series(dtype=float)
     n_cross = int((chrom_counts > 1).sum()) if not chrom_counts.empty else 0
     missing_fraction = float(missing.mean()) if len(work) else 1.0
-    unmapped_fraction = float(unmapped.mean()) if len(work) else 1.0
+    unmapped_fraction = float(unavailable.mean()) if len(work) else 1.0
+    unblocked_fraction = float(unblocked.mean()) if len(work) else 1.0
     max_span = float(spans.max()) if not spans.empty else float("nan")
     audit_pass = bool(
         n_cross == 0
@@ -1481,6 +1489,7 @@ def external_locus_audit_table(
                 "n_cross_chrom_loci": n_cross,
                 "missing_locus_fraction": missing_fraction,
                 "unmapped_locus_fraction": unmapped_fraction,
+                "unblocked_locus_fraction": unblocked_fraction,
                 "max_locus_span_bp": max_span,
                 "median_genes_per_locus": float(gene_counts.median()) if not gene_counts.empty else float("nan"),
                 "max_genes_per_locus": float(gene_counts.max()) if not gene_counts.empty else float("nan"),
@@ -1754,7 +1763,7 @@ def add_ripple_d_v16_claim_readiness(
         & out["top_tail_pass"]
         & out["leave_topk_pass"]
         & out["v16b_broad_module_pass"]
-        & out["annotation_sensitivity_balanced_pass"]
+        & out["annotation_sensitivity_pass"]
         & out["redundancy_pass"]
     )
     high_confidence_core = out["module_status"].astype(str).eq("distributed_weak_signal_module_candidate") | (
@@ -1824,7 +1833,8 @@ def add_ripple_d_v16_claim_readiness(
         & out["multiplicity_pass"]
         & out["top_tail_pass"]
         & out["leave_topk_pass"]
-        & out["annotation_sensitivity_pass"]
+        & out["v16b_broad_module_pass"]
+        & out["annotation_sensitivity_balanced_pass"]
         & out["redundancy_pass"]
     )
     balanced_high_confidence = (

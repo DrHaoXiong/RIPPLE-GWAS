@@ -1,0 +1,44 @@
+{
+  "external_locus": {
+    "locus_id_column": "eur_ld_block_id",
+    "locus_definition_name": "ldetect_eur_grch37",
+    "locus_source": "LDetect",
+    "locus_source_version": "Berisa_Pickrell_2016",
+    "genome_build": "GRCh37",
+    "ancestry": "EUR",
+    "construction_script": "scripts/build_external_ldblock_score_table.py"
+  },
+  "matching": {
+    "locus_collapse": "max",
+    "degree_bins": 5,
+    "property_bins": 2,
+    "annotation_matching_enabled": false,
+    "require_gene_count_match": true,
+    "null_gene_subset_sampling": true
+  },
+  "null_policy": {
+    "n_null": 10000,
+    "exact_match_rate_min": 0.8,
+    "global_fallback_rate_max": 0.05,
+    "reuse_fallback_rate_max": 0.0,
+    "within_locus_replacement_rate_max": 0.0
+  },
+  "q_policy": {
+    "q_max": 0.1,
+    "correction_method": "benjamini_hochberg",
+    "require_scope_complete": true,
+    "require_empirical_resolution": true
+  },
+  "components": [
+    "symmetric_huber_mean_burden",
+    "positive_part_max_burden",
+    "adaptive_truncated_sum"
+  ],
+  "topk_fractions": [0.1, 0.2, 0.5, 1.0],
+  "topk_min_loci": 3,
+  "min_present_genes": 5,
+  "dispersion_effective_loci_min": 5.0,
+  "leave_top1_empirical_p_max": 0.025,
+  "leave_top1_supportive_p_max": 0.1,
+  "score_cap": 3.0
+}

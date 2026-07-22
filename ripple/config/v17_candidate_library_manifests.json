@@ -1,0 +1,53 @@
+{
+  "libraries": [
+    {
+      "library_id": "anchored_broad_reactome_go_v1",
+      "role": "broad_discovery",
+      "selection": {
+        "selection_stage": "none",
+        "selection_rule": "complete_eligible_parent_library",
+        "selection_source": "pre_registered"
+      },
+      "scope": {
+        "correction_scope_id": "v17_broad_reactome_go_parent_v1",
+        "registered_library_fingerprint": "b761144289ce4b8de859ec372635f4101d8f5c62b7920c399c83237bd794c1ef",
+        "claim_level": "manuscript_candidate",
+        "scope_complete": true
+      },
+      "provenance": {
+        "library_source": "Reactome_GO_external_anchored_library",
+        "library_version": "v1",
+        "created_by": "scripts/build_external_anchored_gene_sets.py",
+        "library_path": "20_processed_data/reference_pathways/anchored_broad_reactome_go_v1/tables/anchored_broad_reactome_go_gene_sets.tsv.gz"
+      },
+      "file_checksums": {
+        "20_processed_data/reference_pathways/anchored_broad_reactome_go_v1/tables/anchored_broad_reactome_go_gene_sets.tsv.gz": "effdcdf8e0ac112330b1393315a5e9082db5eeecc16dc50089a099d7778a5a72"
+      }
+    },
+    {
+      "library_id": "dr_specific_retinal_panel_v1",
+      "role": "fixed_panel",
+      "selection": {
+        "selection_stage": "selected_externally",
+        "selected_from_scope_id": "dr_retinal_biology_pre_registered",
+        "selection_rule": "frozen_16_member_retinal_panel",
+        "selection_source": "external_biology_prior"
+      },
+      "scope": {
+        "correction_scope_id": "v17_fixed_retinal_panel_v1",
+        "registered_library_fingerprint": "0ca8132642632f9777a90822991b78ceb16309130190496689a1aee4078483ab",
+        "claim_level": "diagnostic_only",
+        "scope_complete": true
+      },
+      "provenance": {
+        "library_source": "DR_retinal_fixed_biological_panel",
+        "library_version": "v1",
+        "created_by": "scripts/build_dr_specific_library_v1.py",
+        "library_path": "20_processed_data/reference_pathways/dr_specific_library_v1/tables/dr_specific_library_v1.retinal_only.gene_sets.tsv.gz"
+      },
+      "file_checksums": {
+        "20_processed_data/reference_pathways/dr_specific_library_v1/tables/dr_specific_library_v1.retinal_only.gene_sets.tsv.gz": "77cdd6127440e4094301ed6d4a46bed03cb99c5858051d17f7ffd80f3b92b398"
+      }
+    }
+  ]
+}

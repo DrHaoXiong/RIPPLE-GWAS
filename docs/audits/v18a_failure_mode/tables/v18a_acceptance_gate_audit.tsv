@@ -1,0 +1,9 @@
+gate_id	criterion	observed_evidence	status	blocking_effect
+G_NULL	pure-null nominal FPR <= 0.05	0/20 nominal weak calls	provisional_pass	Requires larger held-out calibration before release
+G_ARTIFACT_5	five-strong distributed false-call rate <= 0.05	6/20 nominal weak calls	fail	Blocks Phase 2 progression
+G_ARTIFACT_8	eight-strong distributed false-call rate <= 0.05	6/20 nominal weak calls	fail	Blocks Phase 2 progression
+G_POWER_15_E1	15/30 effect-1.0 power >= 0.65	7/20 nominal weak calls	fail	Blocks Phase 2 progression
+G_POWER_8_E1P5	8/30 effect-1.5 power >= 0.60	5/20 nominal weak calls	fail	Blocks Phase 2 progression
+G_POWER_15_E2	15/30 effect-2.0 power >= 0.85	15/20 nominal weak calls	fail	Blocks Phase 2 progression
+G_CONVERGENCE	fit convergence >= 0.995	1.0 in all six scenarios	pass	Numerical convergence is not the main blocker
+G_REAL_TRAIT	all Phase 2 and nested Type I gates pass	Prerequisites not met	blocked	No DR_MVP full-library V1.8 claim run

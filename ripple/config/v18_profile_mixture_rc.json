@@ -1,0 +1,14 @@
+{
+  "analysis_id": "tier4_v18_profile_mixture_v0_1",
+  "statistic_version": "v18_profile_mixture_fixed_grid_v1",
+  "weak_component_means": [0.25, 0.5, 0.75, 1.0, 1.5],
+  "strong_component_means": [2.0, 3.0, 4.0],
+  "em_tolerance": 1e-8,
+  "em_max_iter": 500,
+  "primary_locus_score": "capped_gene_max",
+  "matched_null": "v17_primary_5x2_annotation_off_within_locus_subset_sampling",
+  "locus_reference": "LDetect_EUR_GRCh37",
+  "multiplicity": {"primary": "GO_Reactome_hierarchical_FDR", "mandatory_sensitivity": "full_library_BH", "full_library_size": 3093, "family_q": 0.10},
+  "screening": {"n_null": 1000, "route_if_p_lte": 0.02, "route_top_n": 100, "confirmation_n_null": 40000, "adaptive_tail_if_initial_exceedances_lte": 10, "adaptive_tail_n_null": 400000},
+  "claim_boundary": "experimental_RC_only_no_real_trait_claim_before_fixed_module_power_and_nested_type1_pass"
+}

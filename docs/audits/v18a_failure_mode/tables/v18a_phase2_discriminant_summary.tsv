@@ -1,0 +1,7 @@
+scenario	scenario_role	n_replicates	n_null_per_test	nominal_weak_pass_rate	median_weak_p	median_expected_weak_loci	fit_convergence_rate	frozen_target	gate_status
+pure_null	null_control	20	1000	0.00	1.0	0.0	1.0	false_call_rate_lte_0.05	provisional_pass
+five_strong	strong_artifact_control	20	1000	0.30	1.0	0.0	1.0	distributed_false_call_rate_lte_0.05	fail
+eight_strong	strong_artifact_control	20	1000	0.30	0.17882117882117882	1.453943066870424	1.0	distributed_false_call_rate_lte_0.05	fail
+weak_15_of_30_e1	moderate_distributed_power	20	1000	0.35	0.1053946053946054	3.422233132239808	1.0	power_gte_0.65	fail
+weak_8_of_30_e1p5	moderate_distributed_power	20	1000	0.25	1.0	0.0	1.0	power_gte_0.60	fail
+weak_15_of_30_e2	strong_distributed_power	20	1000	0.75	0.013486513486513488	12.748545187832022	1.0	power_gte_0.85	fail
